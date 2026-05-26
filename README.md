@@ -2,6 +2,11 @@
 
 Dashboard modern untuk sistem Non-Intrusive Load Monitoring (NILM) berbasis Deep Learning dengan sumber data dari `ESP32 + PZEM-004T` melalui `ThingsBoard`, lalu diteruskan ke service inferensi model.
 
+> **Live dashboard (GitHub Pages):** setelah deploy, buka  
+> `https://<username>.github.io/<nama-repo>/`  
+> Bukan halaman README repo — atur **Settings → Pages → branch `main` → folder `/docs`**.  
+> Panduan: [doc/DEPLOY_GITHUB_PAGES.md](doc/DEPLOY_GITHUB_PAGES.md)
+
 ## Stack
 
 - Next.js App Router
@@ -45,8 +50,8 @@ npm run start
 
 | Part | Platform |
 |------|----------|
-| Dashboard (Next.js static) | **GitHub Pages** — [docs/DEPLOY_GITHUB_PAGES.md](docs/DEPLOY_GITHUB_PAGES.md) |
-| ML + ThingsBoard pipeline | **Hugging Face Spaces (Docker)** — [docs/DEPLOY_HUGGINGFACE.md](docs/DEPLOY_HUGGINGFACE.md) |
+| Dashboard (Next.js static) | **GitHub Pages** — [doc/DEPLOY_GITHUB_PAGES.md](doc/DEPLOY_GITHUB_PAGES.md) |
+| ML + ThingsBoard pipeline | **Hugging Face Spaces (Docker)** — [doc/DEPLOY_HUGGINGFACE.md](doc/DEPLOY_HUGGINGFACE.md) |
 
 GitHub secret `ML_SERVICE_URL` = your HF Space URL (e.g. `https://user-nilm-ml.hf.space`).
 

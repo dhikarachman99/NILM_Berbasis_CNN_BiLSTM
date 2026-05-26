@@ -12,6 +12,14 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
   basePath: basePath || undefined,
   assetPrefix: basePath ? `${basePath}/` : undefined,
+  env: {
+    NEXT_PUBLIC_ML_SERVICE_URL:
+      process.env.NEXT_PUBLIC_ML_SERVICE_URL ||
+      process.env.ML_SERVICE_URL ||
+      "http://127.0.0.1:5001",
+    NEXT_PUBLIC_USE_DUMMY_BLYNK:
+      process.env.NEXT_PUBLIC_USE_DUMMY_BLYNK || process.env.USE_DUMMY_BLYNK || "false",
+  },
 };
 
 export default nextConfig;

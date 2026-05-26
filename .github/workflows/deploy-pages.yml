@@ -37,11 +37,20 @@ jobs:
           GITHUB_ACTIONS: "true"
         run: npm run build
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Verify build output
+        run: |
+          test -f out/index.html || (echo "ERROR: out/index.html tidak ada" && exit 1)
+          ls -la out/
+
+      - name: Copy build to docs/ (GitHub Pages folder)
+        run: |
+          rm -rf docs
+          cp -r out docs
+          touch docs/.nojekyll
+
+      - name: Commit and push docs/
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./out
-          publish_branch: gh-pages
-          force_orphan: true
-          enable_jekyll: false
+          commit_message: "deploy: update GitHub Pages dashboard"
+          file_pattern: docs/**
+          skip_dirty_check: true

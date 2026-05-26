@@ -107,7 +107,7 @@ export function SettingsPanel({ settings, modelVersion, onChange }: SettingsPane
                 <span className="font-medium text-slate-800">HF Space:</span> THINGSBOARD_* + NILM_MODEL_DIR
               </p>
               <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">NEXT_PUBLIC_REFRESH_INTERVAL=3000</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">Lihat docs/DEPLOY_GITHUB_PAGES.md</p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">Lihat doc/DEPLOY_GITHUB_PAGES.md</p>
             </div>
           </div>
         </div>

@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect } from "react";
 import {
   Activity,
   BarChart3,
@@ -26,26 +29,42 @@ const navItems: Array<{ key: NavigationSection; label: string; icon: typeof Layo
 ];
 
 export function Sidebar({ activeSection, onChange, mobileOpen, onClose }: SidebarProps) {
+  useEffect(() => {
+    if (!mobileOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileOpen]);
+
   return (
     <>
       <div
         className={cn(
-          "fixed inset-0 z-30 bg-blue-950/30 transition lg:hidden",
+          "fixed inset-0 z-40 bg-slate-900/55 backdrop-blur-sm transition-opacity duration-300 lg:hidden",
           mobileOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
         )}
         onClick={onClose}
+        aria-hidden={!mobileOpen}
       />
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 w-72 border-r border-blue-100 bg-gradient-to-b from-white via-blue-50/40 to-orange-50/40 px-5 py-6 shadow-xl shadow-blue-100/70 transition lg:translate-x-0 lg:shadow-none",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
+          "fixed inset-y-0 left-0 z-50 flex h-[100dvh] w-[min(18rem,88vw)] flex-col overflow-y-auto border-r border-blue-100 bg-white px-4 py-5 shadow-2xl transition-transform duration-300 ease-out sm:px-5 sm:py-6 lg:z-40 lg:w-72 lg:translate-x-0 lg:bg-gradient-to-b lg:from-white lg:via-blue-50/40 lg:to-orange-50/40 lg:shadow-none",
+          mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
+        aria-hidden={!mobileOpen}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-700">NILM Dashboard</p>
-            <h1 className="mt-2 text-xl font-semibold text-slate-900">Energy Monitoring</h1>
-            <p className="mt-2 text-sm leading-6 text-slate-500">Clean dashboard untuk monitoring energi dan inferensi NILM.</p>
+        <div className="flex shrink-0 items-start justify-between gap-3">
+          <div className="min-w-0 pr-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">NILM Dashboard</p>
+            <h1 className="mt-2 text-lg font-semibold text-slate-900 sm:text-xl">Energy Monitoring</h1>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Monitoring energi dan inferensi NILM.
+            </p>
           </div>
           <button
             type="button"
@@ -57,7 +76,7 @@ export function Sidebar({ activeSection, onChange, mobileOpen, onClose }: Sideba
           </button>
         </div>
 
-        <nav className="mt-8 space-y-2">
+        <nav className="mt-6 shrink-0 space-y-2 sm:mt-8">
           {navItems.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -79,7 +98,7 @@ export function Sidebar({ activeSection, onChange, mobileOpen, onClose }: Sideba
           ))}
         </nav>
 
-        <div className="mt-8 rounded-3xl border border-orange-100 bg-orange-50 p-4">
+        <div className="mt-6 shrink-0 rounded-3xl border border-orange-100 bg-orange-50 p-4 sm:mt-8">
           <p className="text-sm font-semibold text-orange-800">ThingsBoard Telemetry</p>
           <p className="mt-2 text-sm leading-6 text-orange-700">
             Backend membaca telemetry sensor lalu meneruskan sample ke model NILM untuk menghasilkan label perangkat.

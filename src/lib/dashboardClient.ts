@@ -1,10 +1,13 @@
 import type { LatestBlynkResponse } from "@/types/nilm";
 
 function getMlServiceUrl(): string {
-  const url = process.env.NEXT_PUBLIC_ML_SERVICE_URL?.trim();
+  const url =
+    process.env.NEXT_PUBLIC_ML_SERVICE_URL?.trim() ||
+    (process.env.NODE_ENV === "development" ? "http://127.0.0.1:5001" : "");
+
   if (!url) {
     throw new Error(
-      "NEXT_PUBLIC_ML_SERVICE_URL belum diatur. Set saat build GitHub Actions atau di .env.local untuk dev.",
+      "ML service URL belum diatur. Local: ML_SERVICE_URL=http://127.0.0.1:5001 di .env",
     );
   }
   return url.replace(/\/$/, "");

@@ -61,8 +61,8 @@ export function DeviceDetectionPanel({
         : [];
 
   return (
-    <div className="rounded-3xl border border-blue-100/80 bg-white/95 p-5 shadow-sm shadow-blue-100/70">
-      <div className="flex items-start justify-between gap-4">
+    <div className="rounded-3xl border border-blue-100/80 bg-white/95 p-4 shadow-sm shadow-blue-100/70 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Device Detection Panel</h2>
           <p className="text-sm text-slate-500">

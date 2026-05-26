@@ -24,6 +24,7 @@ import { SettingsPanel } from "@/components/SettingsPanel";
 import { Sidebar } from "@/components/Sidebar";
 import { SystemStatus } from "@/components/SystemStatus";
 import {
+  cn,
   formatNumber,
   formatDeviceLabel,
   formatTimestamp,
@@ -107,10 +108,10 @@ function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-3xl border border-blue-100/80 bg-white/95 p-6 shadow-sm shadow-blue-100/70">
-      <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
+    <section className="rounded-3xl border border-blue-100/80 bg-white/95 p-4 shadow-sm shadow-blue-100/70 sm:p-6">
+      <h2 className="text-lg font-semibold text-slate-900 sm:text-xl">{title}</h2>
       <p className="mt-1 text-sm text-slate-500">{description}</p>
-      <div className="mt-5">{children}</div>
+      <div className="mt-4 sm:mt-5">{children}</div>
     </section>
   );
 }
@@ -415,7 +416,7 @@ export default function HomePage() {
   );
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen min-h-[100dvh] overflow-x-hidden">
       <Sidebar
         activeSection={activeSection}
         onChange={setActiveSection}
@@ -423,7 +424,13 @@ export default function HomePage() {
         onClose={() => setMobileOpen(false)}
       />
 
-      <div className="lg:pl-72">
+      <div
+        className={cn(
+          "min-w-0 transition-[filter] duration-300 lg:pl-72",
+          mobileOpen ? "max-lg:pointer-events-none max-lg:select-none max-lg:blur-[1px]" : "",
+        )}
+        aria-hidden={mobileOpen}
+      >
         <Header
           statusLabel={statusLabel}
           lastUpdated={data?.timestamp ?? lastUpdated}
@@ -432,7 +439,7 @@ export default function HomePage() {
           onOpenMenu={() => setMobileOpen(true)}
         />
 
-        <main className="space-y-6 px-4 py-6 sm:px-6 xl:px-8">
+        <main className="space-y-5 px-3 py-4 sm:space-y-6 sm:px-6 sm:py-6 xl:px-8">
           {activeSection === "dashboard" ? dashboardContent : null}
           {activeSection === "device-detection" ? deviceContent : null}
           {activeSection === "energy-analytics" ? analyticsContent : null}
