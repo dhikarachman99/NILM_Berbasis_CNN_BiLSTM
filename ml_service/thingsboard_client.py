@@ -57,10 +57,24 @@ def _login_token() -> str:
   return str(token)
 
 
+def _tenant_auth_header(token: str) -> str:
+  """
+  ThingsBoard 4.3+ REST API key: X-Authorization: ApiKey <tb_...>
+  JWT dari /api/auth/login: X-Authorization: Bearer <jwt>
+  """
+  normalized = token.strip()
+  if normalized.startswith("tb_"):
+    return f"ApiKey {normalized}"
+  if normalized.startswith("eyJ"):
+    return f"Bearer {normalized}"
+  # Default: treat as REST API key (ThingsBoard Cloud)
+  return f"ApiKey {normalized}"
+
+
 def _auth_headers() -> dict[str, str]:
   api_token = _api_token()
   if api_token:
-    return {"X-Authorization": f"Bearer {api_token}"}
+    return {"X-Authorization": _tenant_auth_header(api_token)}
   return {"X-Authorization": f"Bearer {_login_token()}"}
 
 
@@ -125,12 +139,7 @@ def _telemetry_via_tenant_api() -> dict[str, Any]:
   return response.json()
 
 
-def fetch_thingsboard_sample() -> dict[str, float]:
-  auth_mode = (os.environ.get("THINGSBOARD_AUTH_MODE") or "auto").strip().lower()
-  use_device_api = auth_mode == "device_token" or (auth_mode == "auto" and _device_token() and not _api_token())
-
-  telemetry = _telemetry_via_device_api() if use_device_api else _telemetry_via_tenant_api()
-
+def _sample_from_telemetry(telemetry: dict[str, Any]) -> dict[str, float]:
   return {
     "voltage": _parse_value(telemetry.get(TELEMETRY_KEYS["voltage"]), 220.0),
     "current": _parse_value(telemetry.get(TELEMETRY_KEYS["current"]), 0.0),
@@ -139,3 +148,28 @@ def fetch_thingsboard_sample() -> dict[str, float]:
     "frequency": _parse_value(telemetry.get(TELEMETRY_KEYS["frequency"]), 50.0),
     "power_factor": _parse_value(telemetry.get(TELEMETRY_KEYS["power_factor"]), 0.0),
   }
+
+
+def fetch_thingsboard_sample() -> dict[str, float]:
+  auth_mode = (os.environ.get("THINGSBOARD_AUTH_MODE") or "auto").strip().lower()
+
+  if auth_mode == "device_token":
+    return _sample_from_telemetry(_telemetry_via_device_api())
+
+  if auth_mode in ("api_token", "jwt", "login"):
+    return _sample_from_telemetry(_telemetry_via_tenant_api())
+
+  # auto: tenant API jika ada API token / login; fallback device token jika 401
+  if _api_token() or (_device_id() and not _device_token()):
+    try:
+      return _sample_from_telemetry(_telemetry_via_tenant_api())
+    except requests.HTTPError as exc:
+      status = exc.response.status_code if exc.response is not None else None
+      if status in (401, 403) and _device_token():
+        return _sample_from_telemetry(_telemetry_via_device_api())
+      raise
+
+  if _device_token():
+    return _sample_from_telemetry(_telemetry_via_device_api())
+
+  return _sample_from_telemetry(_telemetry_via_tenant_api())

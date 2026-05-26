@@ -83,5 +83,18 @@ Lalu di terminal lain: `npm run dev`
 |---------|--------|
 | ML service gagal load model | Cek `src/nilm_models_v9/best_nilm_model.keras` ada |
 | Dashboard "ML service error" | Pastikan terminal ML masih jalan; buka `/health` |
-| ThingsBoard error | Cek token di `.env`; atau `USE_DUMMY_BLYNK=true` |
-| CORS error | Restart `python app.py` (sudah ada flask-cors) |
+| ThingsBoard 401 | Token `tb_*` harus REST API key (Profile → Security). Restart ML service setelah ubah `.env` |
+| ThingsBoard error lain | Cek token di `.env`; atau `USE_DUMMY_BLYNK=true` |
+| CORS error + 404 `/dashboard/latest` | Proses lama masih jalan di port 5001. Hentikan lalu restart `python app.py` (lihat bawah) |
+| CORS error saja | Restart `python app.py` (sudah ada flask-cors) |
+
+**404 `/dashboard/latest`:** buka http://127.0.0.1:5001/ — jika daftar endpoint **tidak** memuat `/dashboard/latest`, server masih versi lama:
+
+```powershell
+# Cari PID di port 5001 (Windows)
+netstat -ano | findstr :5001
+# Hentikan (ganti <PID>)
+taskkill /PID <PID> /F
+cd c:\Users\Dhikarachman\tugas_akhir\ml_service
+python app.py
+```

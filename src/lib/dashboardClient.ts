@@ -27,10 +27,17 @@ export async function fetchDashboardLatest(): Promise<LatestBlynkResponse> {
   }
 
   const endpoint = `${getMlServiceUrl()}/dashboard/latest`;
-  const response = await fetch(endpoint, {
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+  } catch {
+    throw new Error(
+      `Tidak bisa terhubung ke ML service (${endpoint}). Pastikan server jalan: cd ml_service && python app.py`,
+    );
+  }
 
   const rawText = await response.text();
   let payload: LatestBlynkResponse & { meta?: unknown };
@@ -38,7 +45,18 @@ export async function fetchDashboardLatest(): Promise<LatestBlynkResponse> {
   try {
     payload = JSON.parse(rawText) as LatestBlynkResponse & { meta?: unknown };
   } catch {
+    if (response.status === 404) {
+      throw new Error(
+        "Endpoint /dashboard/latest tidak ada (404). Restart ML service: hentikan proses lama di port 5001, lalu jalankan ulang `cd ml_service && python app.py`.",
+      );
+    }
     throw new Error("ML service mengembalikan response yang bukan JSON valid.");
+  }
+
+  if (response.status === 404) {
+    throw new Error(
+      "Endpoint /dashboard/latest tidak ada (404). Restart ML service: hentikan proses lama di port 5001, lalu jalankan ulang `cd ml_service && python app.py`.",
+    );
   }
 
   if (!response.ok || !payload.success || !payload.data) {

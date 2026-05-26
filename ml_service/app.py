@@ -40,11 +40,18 @@ _NOTEBOOK_GLOB = "*.ipynb"
 _MODEL_ARCHIVE_GLOB = "*.keras"
 
 app = Flask(__name__)
-_cors_origins = os.environ.get("CORS_ORIGINS", "*")
+_cors_raw = os.environ.get("CORS_ORIGINS", "*").strip()
+_cors_origins = (
+  [origin.strip() for origin in _cors_raw.split(",") if origin.strip()]
+  if _cors_raw and _cors_raw != "*"
+  else "*"
+)
 CORS(
   app,
-  origins=[origin.strip() for origin in _cors_origins.split(",") if origin.strip()],
+  resources={r"/*": {"origins": _cors_origins}},
   supports_credentials=False,
+  methods=["GET", "POST", "OPTIONS"],
+  allow_headers=["Content-Type", "Accept"],
 )
 
 _MODEL = None
@@ -1440,6 +1447,7 @@ def index():
         "/model/files/config.json",
         "/model/files/metadata.json",
         "/latest",
+        "/dashboard/latest",
         "/predict",
         "/ingest",
         "/thingsboard/ingest",
