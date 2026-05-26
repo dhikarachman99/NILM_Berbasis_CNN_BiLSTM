@@ -1,3 +1,8 @@
+export interface DeviceProbability {
+  device: string;
+  probability: number;
+}
+
 export interface NilmData {
   voltage: number;
   current: number;
@@ -9,6 +14,9 @@ export interface NilmData {
   confidence: number;
   model_version: string;
   timestamp: string;
+  active_devices?: string[];
+  device_probs?: DeviceProbability[];
+  buffer_status?: string;
 }
 
 export type DataSource = "blynk" | "thingsboard" | "dummy";

@@ -1,4 +1,5 @@
-import type { NilmData } from "@/types/nilm";
+import { heuristicLabelFromPower, labelToDeviceKey, resolveLabelFromActiveDevices } from "@/lib/nilmMeta";
+import type { DeviceProbability, NilmData } from "@/types/nilm";
 
 export interface SensorSample {
   voltage: number;
@@ -16,10 +17,48 @@ export interface InferenceResponse {
   model_version?: string;
   label_source?: string;
   timestamp?: string;
+  problem_type?: string;
+  active_devices?: string[];
+  device_probs?: DeviceProbability[];
   buffer?: {
     status?: string;
+    received?: number;
+    window?: number;
   };
   error?: string;
+}
+
+export function mapInferenceToNilmFields(
+  inference: InferenceResponse,
+): Pick<NilmData, "active_devices" | "device_probs" | "buffer_status"> {
+  const activeDevices =
+    inference.active_devices ??
+    (inference.label ? labelToDeviceKey(inference.label) : []);
+
+  return {
+    active_devices: activeDevices,
+    device_probs: inference.device_probs ?? [],
+    buffer_status: inference.buffer?.status,
+  };
+}
+
+export function resolveDetectedLabel(inference: InferenceResponse): string {
+  if (inference.label === "filling_buffer") {
+    return "idle";
+  }
+
+  if (inference.label && inference.label !== "unknown") {
+    const fromActive = inference.active_devices?.length
+      ? resolveLabelFromActiveDevices(inference.active_devices)
+      : null;
+    return fromActive ?? inference.label;
+  }
+
+  if (inference.active_devices?.length) {
+    return resolveLabelFromActiveDevices(inference.active_devices);
+  }
+
+  return inference.label ?? "unknown";
 }
 
 export interface LatestMlResponse {
@@ -115,12 +154,44 @@ export async function fetchLatestMlData(): Promise<LatestMlData> {
   };
 }
 
-export function buildFallbackNilmData(sample: SensorSample, timestamp: string): NilmData {
+export function buildMlFallbackInference(sample: SensorSample): InferenceResponse {
+  const idle = heuristicLabelFromPower(sample.power);
+  const timestamp = new Date().toISOString();
+
+  if (idle) {
+    return {
+      success: false,
+      label: idle.label,
+      confidence: idle.confidence,
+      model_version: "N/A",
+      timestamp,
+      label_source: "heuristic:noise_floor",
+      active_devices: [],
+      device_probs: [],
+    };
+  }
+
   return {
-    ...sample,
-    device_detected: "unknown",
+    success: false,
+    label: "unknown",
     confidence: 0,
     model_version: "N/A",
     timestamp,
+    label_source: "fallback",
+    active_devices: [],
+    device_probs: [],
+  };
+}
+
+export function buildFallbackNilmData(sample: SensorSample, timestamp: string): NilmData {
+  const inference = buildMlFallbackInference(sample);
+  return {
+    ...sample,
+    device_detected: inference.label ?? "unknown",
+    confidence: inference.confidence ?? 0,
+    model_version: inference.model_version ?? "N/A",
+    timestamp,
+    active_devices: [],
+    device_probs: [],
   };
 }

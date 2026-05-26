@@ -1,4 +1,9 @@
-import { inferFromMlService } from "@/lib/mlService";
+import {
+  buildMlFallbackInference,
+  inferFromMlService,
+  mapInferenceToNilmFields,
+  resolveDetectedLabel,
+} from "@/lib/mlService";
 import type { NilmData } from "@/types/nilm";
 
 const TELEMETRY_KEY_MAP = {
@@ -32,18 +37,29 @@ type TelemetryPoint = {
 
 type ThingsBoardTelemetry = Partial<Record<TelemetryKey, TelemetryPoint[]>>;
 
-let cachedJwt: string | null = null;
+type ThingsBoardAuthMode = "api_token" | "jwt" | "login" | "device_token";
+
+let cachedLoginToken: string | null = null;
 
 function getThingsBoardBaseUrl() {
   return (process.env.THINGSBOARD_BASE_URL || "").trim().replace(/\/$/, "");
 }
 
+/** Token kredensial perangkat (MQTT/HTTP device API). */
 function getThingsBoardDeviceToken() {
   return process.env.THINGSBOARD_ACCESS_TOKEN?.trim() || "";
 }
 
-function getThingsBoardJwtToken() {
-  return process.env.THINGSBOARD_JWT_TOKEN?.trim() || "";
+/**
+ * REST API token dari ThingsBoard (Profile → Security → API keys).
+ * Prioritas: THINGSBOARD_API_TOKEN, lalu THINGSBOARD_JWT_TOKEN (legacy).
+ */
+function getThingsBoardApiToken() {
+  return (
+    process.env.THINGSBOARD_API_TOKEN?.trim() ||
+    process.env.THINGSBOARD_JWT_TOKEN?.trim() ||
+    ""
+  );
 }
 
 function getThingsBoardUsername() {
@@ -56,6 +72,43 @@ function getThingsBoardPassword() {
 
 function getThingsBoardDeviceId() {
   return process.env.THINGSBOARD_DEVICE_ID?.trim() || "";
+}
+
+function getThingsBoardAuthMode(): ThingsBoardAuthMode {
+  const forced = (process.env.THINGSBOARD_AUTH_MODE || "auto").trim().toLowerCase();
+
+  if (forced === "api_token" || forced === "jwt" || forced === "login" || forced === "device_token") {
+    return forced;
+  }
+
+  if (getThingsBoardApiToken()) {
+    return process.env.THINGSBOARD_API_TOKEN?.trim() ? "api_token" : "jwt";
+  }
+
+  if (getThingsBoardUsername() && getThingsBoardPassword()) {
+    return "login";
+  }
+
+  if (getThingsBoardDeviceToken()) {
+    return "device_token";
+  }
+
+  return "login";
+}
+
+function getAuthModeLabel(mode: ThingsBoardAuthMode) {
+  switch (mode) {
+    case "api_token":
+      return "REST API token";
+    case "jwt":
+      return "JWT (legacy)";
+    case "device_token":
+      return "device access token (HTTP API v1)";
+    case "login":
+      return "login username/password";
+    default:
+      return mode;
+  }
 }
 
 async function parseThingsBoardJson<T>(response: Response, endpoint: string): Promise<T> {
@@ -74,15 +127,8 @@ async function parseThingsBoardJson<T>(response: Response, endpoint: string): Pr
 }
 
 async function loginThingsBoard(forceRefresh = false) {
-  const envJwt = getThingsBoardJwtToken();
-
-  if (envJwt && !forceRefresh) {
-    cachedJwt = envJwt;
-    return envJwt;
-  }
-
-  if (cachedJwt && !forceRefresh) {
-    return cachedJwt;
+  if (cachedLoginToken && !forceRefresh) {
+    return cachedLoginToken;
   }
 
   const baseUrl = getThingsBoardBaseUrl();
@@ -94,7 +140,9 @@ async function loginThingsBoard(forceRefresh = false) {
   }
 
   if (!username || !password) {
-    throw new Error("THINGSBOARD_JWT_TOKEN belum diatur, dan fallback THINGSBOARD_USERNAME/THINGSBOARD_PASSWORD juga belum lengkap.");
+    throw new Error(
+      "THINGSBOARD_API_TOKEN belum diatur, dan fallback THINGSBOARD_USERNAME/THINGSBOARD_PASSWORD juga belum lengkap.",
+    );
   }
 
   const endpoint = `${baseUrl}/api/auth/login`;
@@ -117,13 +165,28 @@ async function loginThingsBoard(forceRefresh = false) {
     throw new Error("Login ThingsBoard gagal. Periksa username/password tenant.");
   }
 
-  cachedJwt = payload.token;
-  return cachedJwt;
+  cachedLoginToken = payload.token;
+  return cachedLoginToken;
+}
+
+async function resolveTenantAuthToken(forceRefresh = false): Promise<{ token: string; authScheme: "api_key" | "jwt" }> {
+  const apiToken = getThingsBoardApiToken();
+  if (apiToken) {
+    return { token: apiToken, authScheme: "api_key" };
+  }
+
+  return { token: await loginThingsBoard(forceRefresh), authScheme: "jwt" };
+}
+
+function buildTenantAuthHeader(token: string, authScheme: "api_key" | "jwt"): string {
+  // ThingsBoard 4.3+ REST API key: X-Authorization: ApiKey <tb_...>
+  // JWT dari login: X-Authorization: Bearer <jwt>
+  return authScheme === "api_key" ? `ApiKey ${token}` : `Bearer ${token}`;
 }
 
 async function thingsBoardFetchJson<T>(path: string, init?: RequestInit, retry = true): Promise<T> {
   const baseUrl = getThingsBoardBaseUrl();
-  const token = await loginThingsBoard();
+  const { token, authScheme } = await resolveTenantAuthToken();
   const endpoint = `${baseUrl}${path}`;
 
   const response = await fetch(endpoint, {
@@ -132,12 +195,12 @@ async function thingsBoardFetchJson<T>(path: string, init?: RequestInit, retry =
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      "X-Authorization": `Bearer ${token}`,
+      "X-Authorization": buildTenantAuthHeader(token, authScheme),
       ...(init?.headers ?? {}),
     },
   });
 
-  if ((response.status === 401 || response.status === 403) && retry) {
+  if ((response.status === 401 || response.status === 403) && retry && !getThingsBoardApiToken()) {
     await loginThingsBoard(true);
     return thingsBoardFetchJson<T>(path, init, false);
   }
@@ -145,7 +208,28 @@ async function thingsBoardFetchJson<T>(path: string, init?: RequestInit, retry =
   return parseThingsBoardJson<T>(response, endpoint);
 }
 
-async function resolveDeviceId() {
+async function fetchDeviceApiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const baseUrl = getThingsBoardBaseUrl();
+  const deviceToken = getThingsBoardDeviceToken();
+
+  if (!deviceToken) {
+    throw new Error("THINGSBOARD_ACCESS_TOKEN belum diatur untuk mode device_token.");
+  }
+
+  const endpoint = `${baseUrl}${path}`;
+  const response = await fetch(endpoint, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+
+  return parseThingsBoardJson<T>(response, endpoint);
+}
+
+async function resolveDeviceIdViaTenantApi() {
   const deviceId = getThingsBoardDeviceId();
   if (deviceId) {
     return deviceId;
@@ -154,8 +238,8 @@ async function resolveDeviceId() {
   const accessToken = getThingsBoardDeviceToken();
   if (!accessToken) {
     throw new Error(
-      "THINGSBOARD_DEVICE_ID atau THINGSBOARD_ACCESS_TOKEN belum diatur. " +
-      "Gunakan deviceId atau access token agar ThingsBoard dapat menemukan perangkat."
+      "THINGSBOARD_DEVICE_ID wajib diisi saat memakai API token tenant, " +
+        "atau isi THINGSBOARD_ACCESS_TOKEN agar device dapat ditemukan otomatis.",
     );
   }
 
@@ -171,51 +255,120 @@ async function resolveDeviceId() {
   return resolvedId;
 }
 
-function getLatestValue(points: TelemetryPoint[] | undefined, key: MetricField) {
+function getLatestValue(points: TelemetryPoint[] | undefined, key: MetricField, defaultValue = 0) {
   const rawValue = points?.[0]?.value;
+
+  if (rawValue === undefined || rawValue === null || rawValue === "") {
+    return defaultValue;
+  }
+
   const numericValue = Number(rawValue);
 
   if (Number.isNaN(numericValue)) {
-    throw new Error(`nilai ${key} dari ThingsBoard tidak valid: ${String(rawValue)}`);
+    return defaultValue;
   }
 
   return numericValue;
 }
 
-export async function fetchLatestThingsBoardDataWithMeta(): Promise<{ data: NilmData; notice?: string }> {
-  const baseUrl = getThingsBoardBaseUrl();
-  const envJwt = getThingsBoardJwtToken();
+async function fetchTelemetryViaTenantApi(): Promise<ThingsBoardTelemetry> {
+  const deviceId = await resolveDeviceIdViaTenantApi();
+  const keys = Object.values(TELEMETRY_KEY_MAP).join(",");
 
-  if (!baseUrl) {
-    throw new Error("THINGSBOARD_BASE_URL belum diatur.");
+  // Ambil nilai terbaru per key (tanpa jendela 5 menit — kosong jika ESP32 offline sementara)
+  const latestQuery = new URLSearchParams({ keys, limit: "1" });
+  const latest = await thingsBoardFetchJson<ThingsBoardTelemetry>(
+    `/api/plugins/telemetry/DEVICE/${deviceId}/values/timeseries?${latestQuery.toString()}`,
+  );
+
+  const hasAnyPoint = Object.values(TELEMETRY_KEY_MAP).some((telemetryKey) => {
+    const points = latest[telemetryKey];
+    return Array.isArray(points) && points.length > 0;
+  });
+
+  if (hasAnyPoint) {
+    return latest;
   }
 
-  const deviceId = await resolveDeviceId();
+  // Fallback: cari dalam 24 jam terakhir jika belum ada titik di response "latest"
   const endTs = Date.now();
-  const startTs = endTs - 300000;
-  const query = new URLSearchParams({
-    keys: Object.values(TELEMETRY_KEY_MAP).join(","),
+  const startTs = endTs - 86_400_000;
+  const rangeQuery = new URLSearchParams({
+    keys,
     startTs: String(startTs),
     endTs: String(endTs),
     limit: "1",
     agg: "NONE",
   });
 
-  const telemetry = await thingsBoardFetchJson<ThingsBoardTelemetry>(
-    `/api/plugins/telemetry/DEVICE/${deviceId}/values/timeseries?${query.toString()}`,
+  return thingsBoardFetchJson<ThingsBoardTelemetry>(
+    `/api/plugins/telemetry/DEVICE/${deviceId}/values/timeseries?${rangeQuery.toString()}`,
   );
+}
 
+async function fetchTelemetryViaDeviceApi(): Promise<ThingsBoardTelemetry> {
+  const deviceToken = getThingsBoardDeviceToken();
+  const query = new URLSearchParams({
+    keys: Object.values(TELEMETRY_KEY_MAP).join(","),
+    limit: "1",
+  });
+
+  return fetchDeviceApiJson<ThingsBoardTelemetry>(
+    `/api/v1/${encodeURIComponent(deviceToken)}/telemetry?${query.toString()}`,
+  );
+}
+
+function sampleFromTelemetry(telemetry: ThingsBoardTelemetry) {
   const sample = {
     voltage: getLatestValue(telemetry[TELEMETRY_KEY_MAP.voltage], "voltage"),
     current: getLatestValue(telemetry[TELEMETRY_KEY_MAP.current], "current"),
     power: getLatestValue(telemetry[TELEMETRY_KEY_MAP.power], "power"),
     energy: getLatestValue(telemetry[TELEMETRY_KEY_MAP.energy], "energy"),
-    frequency: getLatestValue(telemetry[TELEMETRY_KEY_MAP.frequency], "frequency"),
-    power_factor: getLatestValue(telemetry[TELEMETRY_KEY_MAP.power_factor], "power_factor"),
+    frequency: getLatestValue(telemetry[TELEMETRY_KEY_MAP.frequency], "frequency", 50),
+    power_factor: getLatestValue(telemetry[TELEMETRY_KEY_MAP.power_factor], "power_factor", 0),
   };
+
+  const missingKeys = (Object.keys(TELEMETRY_KEY_MAP) as MetricField[]).filter((field) => {
+    const telemetryKey = TELEMETRY_KEY_MAP[field];
+    const points = telemetry[telemetryKey];
+    return !Array.isArray(points) || points.length === 0;
+  });
+
+  return { sample, missingKeys };
+}
+
+export async function fetchLatestThingsBoardDataWithMeta(): Promise<{ data: NilmData; notice?: string }> {
+  const baseUrl = getThingsBoardBaseUrl();
+  const authMode = getThingsBoardAuthMode();
+
+  if (!baseUrl) {
+    throw new Error("THINGSBOARD_BASE_URL belum diatur.");
+  }
+
+  if (authMode === "device_token" && !getThingsBoardDeviceToken()) {
+    throw new Error(
+      "Mode device_token dipilih tetapi THINGSBOARD_ACCESS_TOKEN kosong. " +
+        "Isi token perangkat atau gunakan THINGSBOARD_API_TOKEN untuk REST API tenant.",
+    );
+  }
+
+  if ((authMode === "api_token" || authMode === "jwt") && !getThingsBoardApiToken()) {
+    throw new Error("THINGSBOARD_API_TOKEN belum diatur.");
+  }
+
+  const telemetry =
+    authMode === "device_token" ? await fetchTelemetryViaDeviceApi() : await fetchTelemetryViaTenantApi();
+
+  const { sample, missingKeys } = sampleFromTelemetry(telemetry);
 
   let inference;
   const notices: string[] = [];
+
+  if (missingKeys.length > 0) {
+    notices.push(
+      `Beberapa key telemetry kosong di ThingsBoard (${missingKeys.join(", ")}). Nilai default dipakai untuk key yang hilang.`,
+    );
+  }
 
   try {
     inference = await inferFromMlService(sample);
@@ -231,15 +384,15 @@ export async function fetchLatestThingsBoardDataWithMeta(): Promise<{ data: Nilm
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown ML service error";
-    notices.push(`ML service tidak dapat diakses (${message}). Menggunakan fallback label unknown dan confidence 0.`);
-    inference = {
-      success: false,
-      label: "unknown",
-      confidence: 0,
-      model_version: "N/A",
-      timestamp: new Date().toISOString(),
-      label_source: "fallback",
-    };
+    inference = buildMlFallbackInference(sample);
+
+    if (inference.label === "idle") {
+      notices.push(
+        `ML service tidak dapat diakses (${message}). Daya ${sample.power.toFixed(1)} W di bawah noise floor — ditampilkan sebagai idle.`,
+      );
+    } else {
+      notices.push(`ML service tidak dapat diakses (${message}). Menggunakan fallback label unknown dan confidence 0.`);
+    }
   }
 
   if (inference.buffer?.status && inference.buffer.status !== "READY") {
@@ -247,16 +400,24 @@ export async function fetchLatestThingsBoardDataWithMeta(): Promise<{ data: Nilm
   }
 
   notices.push(
-    `Dashboard membaca telemetry live dari ThingsBoard${baseUrl ? ` di ${baseUrl}` : ""} dan meneruskan sample ke ML service untuk inferensi.${envJwt ? " Autentikasi memakai JWT manual." : " Autentikasi memakai login tenant otomatis."}`,
+    `Dashboard membaca telemetry live dari ThingsBoard di ${baseUrl}. Autentikasi: ${getAuthModeLabel(authMode)}.`,
   );
+
+  if (authMode === "api_token" || authMode === "jwt") {
+    const deviceId = getThingsBoardDeviceId();
+    if (!deviceId) {
+      notices.push("Tips: set THINGSBOARD_DEVICE_ID di .env agar lookup perangkat lebih cepat.");
+    }
+  }
 
   return {
     data: {
       ...sample,
-      device_detected: inference.label ?? "unknown",
+      device_detected: resolveDetectedLabel(inference),
       confidence: inference.confidence ?? 0,
       model_version: inference.model_version ?? "N/A",
       timestamp: inference.timestamp ?? new Date().toISOString(),
+      ...mapInferenceToNilmFields(inference),
     },
     notice: notices.join(" "),
   };

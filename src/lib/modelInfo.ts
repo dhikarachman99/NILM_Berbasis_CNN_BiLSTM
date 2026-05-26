@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { getDeviceDisplayMap, getSessionToLabel } from "@/lib/nilmMeta";
 import type { TrainedModelInfo } from "@/types/nilm";
 
 interface ModelLayerConfig {
@@ -161,6 +162,8 @@ export async function readTrainedModelInfo(): Promise<TrainedModelInfo> {
         typeof metaNilm.threshold === "number"
           ? `Threshold aktivasi device di metadata: ${metaNilm.threshold}.`
           : "Threshold aktivasi device tidak tersedia di metadata.",
+        `Kombinasi sesi training: ${Object.values(getSessionToLabel()).join(", ")}.`,
+        `Label tampilan UI diambil dari device_display di meta_nilm.json (${Object.keys(getDeviceDisplayMap()).length} entri).`,
         "Pastikan inferensi menggunakan preprocessing fitur dan window size yang sama seperti saat training.",
       ],
     };

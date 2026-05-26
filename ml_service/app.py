@@ -47,12 +47,113 @@ _LABELS_CACHE_KEY = None
 _MODEL_META_CACHE = None
 _EMA_PROBS = None
 _PRED_QUEUE = deque(maxlen=5)
+_PRED_DEVICE_QUEUE = deque(maxlen=5)
 _PREV_POWER = None
 _LATEST_RESULT = None
 _REQUEST_COUNT = 0
 _SEQ_BUFFER = deque(maxlen=99)
 _LAST_RAW_SAMPLE = None
 _LOCK = Lock()
+_V9_PREDICTOR = None
+_V9_PREDICTOR_KEY: tuple[str, int, int] | None = None
+
+
+def _get_v9_predictor():
+  global _V9_PREDICTOR, _V9_PREDICTOR_KEY
+  meta_path = MODEL_DIR / "meta_nilm.json"
+  keras_path = MODEL_DIR / "best_nilm_model.keras"
+  cache_key = None
+  if meta_path.exists() and keras_path.exists():
+    meta_stat = meta_path.stat()
+    keras_stat = keras_path.stat()
+    cache_key = (
+      str(MODEL_DIR),
+      meta_stat.st_mtime_ns,
+      keras_stat.st_size,
+    )
+
+  if _V9_PREDICTOR is None or _V9_PREDICTOR_KEY != cache_key:
+    from nilm_v9_predictor import NilmV9Predictor
+
+    _V9_PREDICTOR = NilmV9Predictor(MODEL_DIR)
+    _V9_PREDICTOR_KEY = cache_key
+  return _V9_PREDICTOR
+
+
+def _predictor_to_response(pred: dict, sample: dict):
+  meta = _read_model_meta()
+  if _LABEL_SOURCE_CACHE is None:
+    _load_labels()
+  label_source = _LABEL_SOURCE_CACHE or "meta_nilm.json:devices"
+
+  input_shape = meta.get("input_shape") or [30, 8]
+  seq_len = int(input_shape[0]) if input_shape else 30
+  received_len = int(pred.get("buffer_fill") or 0)
+  raw_status = str(pred.get("buffer_status") or "").lower()
+
+  if raw_status == "warming":
+    buffer_status = "WARMING"
+  elif raw_status == "ready":
+    buffer_status = "READY"
+  elif received_len < max(10, seq_len // 3):
+    buffer_status = "WARMING"
+  elif received_len < seq_len:
+    buffer_status = "LOADING"
+  else:
+    buffer_status = "READY"
+
+  label = str(pred.get("label") or "idle")
+  if label == "filling_buffer":
+    label = "idle"
+
+  active_devices = list(pred.get("active_devices") or [])
+  prob_map = {device: float(probability) for device, probability in pred.get("probs") or []}
+  devices = meta.get("devices") or _load_labels()
+  device_probs = [
+    {"device": device, "probability": round(prob_map.get(device, 0.0) * 100.0, 1)}
+    for device in devices
+    if isinstance(device, str)
+  ]
+
+  predictor_confidence = pred.get("confidence")
+  if isinstance(predictor_confidence, (int, float)):
+    chosen_confidence = float(predictor_confidence)
+  elif active_devices:
+    active_probs = [prob_map.get(device, 0.0) for device in active_devices]
+    max_prob = max(active_probs) if active_probs else 0.0
+    min_prob = min(active_probs) if active_probs else 0.0
+    chosen_confidence = (0.3 * min_prob + 0.7 * max_prob) * 100.0
+  else:
+    chosen_confidence = max(0.0, 1.0 - max(prob_map.values(), default=0.0)) * 100.0
+
+  return {
+    "success": True,
+    "label": label,
+    "confidence": round(chosen_confidence, 1),
+    "index": 0,
+    "model_version": pred.get("model_version") or meta.get("model_name") or "unknown_model",
+    "label_source": label_source,
+    "timestamp": _now_iso(),
+    "problem_type": meta.get("problem_type") or "multilabel",
+    "active_devices": active_devices,
+    "device_probs": device_probs,
+    "buffer": {
+      "received": received_len,
+      "window": seq_len,
+      "status": buffer_status,
+      "bar": _format_buffer_bar(received_len, seq_len),
+    },
+    "raw_top": {
+      "label": label,
+      "confidence": round(chosen_confidence, 1),
+      "index": 0,
+    },
+    "raw_second": {
+      "label": label,
+      "confidence": round(chosen_confidence, 1),
+      "index": 0,
+    },
+  }
 
 
 def _read_json(path: Path):
@@ -274,6 +375,7 @@ def _read_model_meta():
       "problem_type": problem_type,
       "devices": devices,
       "threshold": meta.get("threshold"),
+      "device_thresholds": meta.get("device_thresholds"),
       "smooth_n": meta.get("smooth_n"),
       "session_to_label": meta.get("session_to_label"),
       "scaler_mean": meta.get("scaler_mean"),
@@ -282,6 +384,8 @@ def _read_model_meta():
       "transition_delta": meta.get("transition_delta"),
       "conf_thresh": meta.get("conf_thresh"),
       "power_range": meta.get("power_range"),
+      "device_display": meta.get("device_display"),
+      "feature_cols": meta.get("feature_cols"),
     }
     return _MODEL_META_CACHE
 
@@ -405,7 +509,7 @@ def _get_label_source():
 
 
 def _ensure_runtime_state():
-  global _SEQ_BUFFER, _PRED_QUEUE
+  global _SEQ_BUFFER, _PRED_QUEUE, _PRED_DEVICE_QUEUE
   meta = _read_model_meta()
   input_shape = meta.get("input_shape") or []
   seq_len = int(input_shape[0]) if len(input_shape) >= 2 and isinstance(input_shape[0], int) else 99
@@ -417,6 +521,9 @@ def _ensure_runtime_state():
 
   if _PRED_QUEUE.maxlen != smooth_n:
     _PRED_QUEUE = deque(list(_PRED_QUEUE)[-smooth_n:], maxlen=smooth_n)
+
+  if _PRED_DEVICE_QUEUE.maxlen != smooth_n:
+    _PRED_DEVICE_QUEUE = deque(list(_PRED_DEVICE_QUEUE)[-smooth_n:], maxlen=smooth_n)
 
 
 def _label_to_device_key(label: str, devices: list[str]):
@@ -442,6 +549,37 @@ def _active_devices_from_label(label: str, devices: list[str]):
 
   device_set = set(devices)
   return [device for device in devices if device in key and device in device_set]
+
+
+def _join_active_devices(active_labels, devices: list[str]):
+  if not isinstance(active_labels, (list, tuple, set)):
+    return "idle"
+
+  active_set = {item.strip() for item in active_labels if isinstance(item, str) and item.strip()}
+  ordered = [device for device in devices if device in active_set]
+  return "+".join(ordered) if ordered else "idle"
+
+
+def _resolve_multilabel_label(active_labels, meta: dict):
+  devices = meta.get("devices")
+  if not isinstance(devices, list):
+    devices = []
+
+  lookup = _multilabel_name_lookup(meta)
+  active_set = frozenset(
+    item.strip()
+    for item in (active_labels or [])
+    if isinstance(item, str) and item.strip() and item.strip() in devices
+  )
+  if active_set in lookup:
+    return lookup[active_set]
+
+  joined = _join_active_devices(active_labels, devices)
+  key = _label_to_device_key(joined, devices)
+  if key is not None and key in lookup:
+    return lookup[key]
+
+  return joined if joined else "idle"
 
 
 def _multilabel_name_lookup(meta: dict):
@@ -529,10 +667,14 @@ def _parse_sequence(payload):
     raise ValueError("Field 'sequence' wajib ada")
 
   arr = np.array(sequence, dtype=np.float32)
-  received_len = int(arr.shape[0]) if arr.ndim >= 2 else 1
+  received_len = int(arr.shape[0]) if arr.ndim >= 2 else (1 if arr.size else 0)
   meta = _read_model_meta()
   input_shape = meta.get("input_shape") or []
   seq_len = int(input_shape[0]) if len(input_shape) >= 2 and isinstance(input_shape[0], int) else 99
+
+  if arr.size == 0:
+    arr = np.zeros((1, 8), dtype=np.float32)
+    received_len = 0
 
   if arr.ndim == 1:
     if arr.size == 8:
@@ -549,10 +691,8 @@ def _parse_sequence(payload):
     arr = arr[-seq_len:, :]
 
   if arr.shape[0] < seq_len:
-    last_row = arr[-1:, :]
-    repeat = seq_len - arr.shape[0]
-    pad = np.repeat(last_row, repeat, axis=0)
-    arr = np.concatenate([arr, pad], axis=0)
+    repeat = int(np.ceil(seq_len / arr.shape[0]))
+    arr = np.tile(arr, (repeat, 1))[:seq_len]
 
   return arr, received_len
 
@@ -581,6 +721,124 @@ def _majority_vote_label():
       order[label] = index
 
   return max(counts, key=lambda label: (counts[label], -order[label]))
+
+
+def _device_threshold(device: str, meta: dict) -> float:
+  overrides = meta.get("device_thresholds")
+  if isinstance(overrides, dict):
+    value = overrides.get(device)
+    if isinstance(value, (int, float)):
+      return float(value)
+  return float(meta.get("threshold") or 0.5)
+
+
+def _active_devices_from_probs(probs: np.ndarray, labels: list[str], devices: list[str], meta: dict):
+  active = []
+  for device in devices:
+    if device not in labels:
+      continue
+    index = labels.index(device)
+    if float(probs[index]) >= _device_threshold(device, meta):
+      active.append(device)
+  return active
+
+
+def _solo_power_range_fits(device: str, power_w: float, power_range: dict, margin: float = 1.15) -> bool:
+  rng = power_range.get(device)
+  if not isinstance(rng, list) or len(rng) < 2:
+    return False
+  return float(rng[0]) <= power_w <= float(rng[1]) * margin
+
+
+def _best_power_match_label(power_w: float, meta: dict):
+  """Cocokkan daya agregat ke session label terdekat di meta power_range."""
+  power_range = meta.get("power_range") or {}
+  noise_floor = float(meta.get("noise_floor_w") or 3.0)
+  if power_w < noise_floor:
+    return "idle"
+
+  candidates = []
+  for label, rng in power_range.items():
+    if label == "idle" or not isinstance(rng, list) or len(rng) < 2:
+      continue
+    lo, hi = float(rng[0]), float(rng[1]) * 1.15
+    if lo <= power_w <= hi:
+      center = (float(rng[0]) + float(rng[1])) / 2.0
+      candidates.append((abs(power_w - center), label))
+
+  if not candidates:
+    return None
+  candidates.sort(key=lambda item: item[0])
+  return candidates[0][1]
+
+
+def _finalize_multilabel_devices(
+  probs: np.ndarray,
+  labels: list[str],
+  devices: list[str],
+  meta: dict,
+  power_w: float,
+):
+  """
+  Gabungkan output model + sidik jari daya (power_range) agar deteksi selaras training v9.
+  """
+  noise_floor = float(meta.get("noise_floor_w") or 3.0)
+  if power_w < noise_floor:
+    return []
+
+  power_range = meta.get("power_range") or {}
+  model_active = _active_devices_from_probs(probs, labels, devices, meta)
+  power_label = _best_power_match_label(power_w, meta)
+  power_active = _active_devices_from_label(power_label, devices) if power_label not in (None, "idle") else []
+  model_label = _resolve_multilabel_label(model_active, meta)
+  max_prob = float(np.max(probs)) if probs.size else 0.0
+
+  if power_label == "idle":
+    return []
+
+  if model_label == power_label or set(model_active) == set(power_active):
+    return model_active
+
+  if max_prob < 0.52 and power_active:
+    return power_active
+
+  if power_w <= 18 and power_label == "charger_hp":
+    return power_active or ["charger_hp"]
+
+  if power_w >= 195 and "hair_dryer" not in (power_label or ""):
+    model_active = [d for d in model_active if d != "hair_dryer"]
+
+  if power_w < 45 and power_active:
+    without_high = [d for d in model_active if d not in ("hair_dryer", "laptop")]
+    if not without_high or max_prob < 0.55:
+      return power_active
+
+  pruned = []
+  for device in model_active:
+    if _solo_power_range_fits(device, power_w, power_range):
+      pruned.append(device)
+    elif device == "charger_hp" and power_label and "charger_hp" in power_label:
+      pruned.append(device)
+
+  if pruned:
+    return pruned
+  if power_active:
+    return power_active
+  return model_active
+
+
+def _majority_vote_active_devices(devices: list[str]):
+  if not _PRED_DEVICE_QUEUE:
+    return []
+
+  votes_needed = (len(_PRED_DEVICE_QUEUE) // 2) + 1
+  counts = {device: 0 for device in devices}
+  for pred_set in _PRED_DEVICE_QUEUE:
+    for device in pred_set:
+      if device in counts:
+        counts[device] += 1
+
+  return [device for device in devices if counts[device] >= votes_needed]
 
 
 def _format_buffer_bar(current: int, total: int, width: int = 20):
@@ -652,14 +910,23 @@ def _scale_sequence(sequence: np.ndarray, meta: dict):
   return sequence
 
 
+def _apparent_power_from_sample(sample):
+  if not isinstance(sample, dict):
+    return 0.0
+  v = _as_float(sample.get("voltage", sample.get("V")))
+  i = _as_float(sample.get("current", sample.get("I")))
+  return v * i
+
+
 def _should_reset_buffer_for_device_change(sample):
   global _PREV_POWER
   if not isinstance(sample, dict):
     return False
 
   current_power = _power_from_sample(sample)
+  apparent_power = _apparent_power_from_sample(sample)
   if _PREV_POWER is None:
-    _PREV_POWER = current_power
+    _PREV_POWER = apparent_power
     return False
 
   meta = _read_model_meta()
@@ -667,11 +934,11 @@ def _should_reset_buffer_for_device_change(sample):
   noise_floor_w = float(meta.get("noise_floor_w") or 3.0)
 
   should_reset = (
-    abs(current_power - _PREV_POWER) > transition_delta
+    abs(apparent_power - _PREV_POWER) > transition_delta
     or (_PREV_POWER <= noise_floor_w and current_power > noise_floor_w)
     or (_PREV_POWER > noise_floor_w and current_power <= noise_floor_w)
   )
-  _PREV_POWER = current_power
+  _PREV_POWER = apparent_power
   return should_reset
 
 
@@ -701,23 +968,152 @@ def _sample_to_dict(sample):
   }
 
 
+def _device_probs_payload(labels, probs, devices=None):
+  order = devices if isinstance(devices, list) and devices else labels
+  label_to_index = {label: index for index, label in enumerate(labels)}
+  payload = []
+
+  for device in order:
+    index = label_to_index.get(device)
+    if index is None:
+      continue
+    payload.append(
+      {
+        "device": device,
+        "probability": round(float(probs[index]) * 100.0, 1),
+      }
+    )
+
+  for index, label in enumerate(labels):
+    if label in order:
+      continue
+    payload.append(
+      {
+        "device": label,
+        "probability": round(float(probs[index]) * 100.0, 1),
+      }
+    )
+
+  return payload
+
+
 def _build_latest_result(sample, response_payload):
   sample_data = _sample_to_dict(sample)
+  data = {
+    **sample_data,
+    "device_detected": response_payload["label"],
+    "confidence": response_payload["confidence"],
+    "model_version": response_payload["model_version"],
+    "timestamp": response_payload["timestamp"],
+  }
+
+  if response_payload.get("active_devices") is not None:
+    data["active_devices"] = response_payload["active_devices"]
+  if response_payload.get("device_probs") is not None:
+    data["device_probs"] = response_payload["device_probs"]
+
   return {
     "success": True,
-    "data": {
-      **sample_data,
-      "device_detected": response_payload["label"],
-      "confidence": response_payload["confidence"],
-      "model_version": response_payload["model_version"],
-      "timestamp": response_payload["timestamp"],
-    },
+    "data": data,
     "meta": {
       "label_source": response_payload.get("label_source"),
       "buffer": response_payload.get("buffer"),
       "raw_top": response_payload.get("raw_top"),
       "raw_second": response_payload.get("raw_second"),
+      "problem_type": response_payload.get("problem_type"),
     },
+  }
+
+
+def _min_buffer_len(meta: dict) -> int:
+  input_shape = meta.get("input_shape") or []
+  seq_len = int(input_shape[0]) if len(input_shape) >= 2 and isinstance(input_shape[0], int) else 30
+  return max(10, seq_len // 3)
+
+
+def _build_warming_response(sample, received_len: int = 0):
+  """Response saat buffer belum cukup (selaras dengan nilm_inference.py MIN_BUF)."""
+  meta = _read_model_meta()
+  if _LABEL_SOURCE_CACHE is None:
+    _load_labels()
+  label_source = _LABEL_SOURCE_CACHE or "meta_nilm.json:devices"
+
+  input_shape = meta.get("input_shape") or []
+  seq_len = int(input_shape[0]) if len(input_shape) >= 2 and isinstance(input_shape[0], int) else 30
+  devices = meta.get("devices")
+  if not isinstance(devices, list) or not devices:
+    devices = _load_labels()
+
+  min_buf = _min_buffer_len(meta)
+  confidence = max(5.0, min(25.0, (received_len / max(min_buf, 1)) * 20.0))
+
+  return {
+    "success": True,
+    "label": "idle",
+    "confidence": round(confidence, 1),
+    "index": 0,
+    "model_version": meta.get("model_name") or "unknown_model",
+    "label_source": label_source,
+    "timestamp": _now_iso(),
+    "problem_type": meta.get("problem_type") or "multilabel",
+    "active_devices": [],
+    "device_probs": [
+      {"device": device, "probability": 0.0}
+      for device in devices
+      if isinstance(device, str) and device.strip()
+    ],
+    "buffer": {
+      "received": received_len,
+      "window": seq_len,
+      "status": "WARMING",
+      "bar": _format_buffer_bar(received_len, seq_len),
+    },
+    "raw_top": {"label": "idle", "confidence": round(confidence, 1), "index": 0},
+    "raw_second": {"label": "idle", "confidence": round(confidence, 1), "index": 0},
+  }
+
+
+def _build_idle_response(sample, received_len: int = 0):
+  """Response idle tanpa inferensi model (buffer kosong atau daya di bawah noise floor)."""
+  meta = _read_model_meta()
+  if _LABEL_SOURCE_CACHE is None:
+    _load_labels()
+  label_source = _LABEL_SOURCE_CACHE or "meta_nilm.json:devices"
+
+  input_shape = meta.get("input_shape") or []
+  seq_len = int(input_shape[0]) if len(input_shape) >= 2 and isinstance(input_shape[0], int) else 30
+  devices = meta.get("devices")
+  if not isinstance(devices, list) or not devices:
+    devices = _load_labels()
+
+  power_w = _power_from_sample(sample)
+  noise_floor_w = float(meta.get("noise_floor_w") or 3.0)
+  buffer_status = "READY" if power_w < noise_floor_w else "LOADING"
+  confidence = 96.0 if power_w < noise_floor_w else max(40.0, 90.0 - (received_len / max(seq_len, 1)) * 50.0)
+
+  return {
+    "success": True,
+    "label": "idle",
+    "confidence": round(confidence, 1),
+    "index": 0,
+    "model_version": meta.get("model_name") or "unknown_model",
+    "label_source": label_source,
+    "timestamp": _now_iso(),
+    "problem_type": meta.get("problem_type") or "multilabel",
+    "active_devices": [],
+    "device_probs": [
+      {"device": device, "probability": 0.0}
+      for device in devices
+      if isinstance(device, str) and device.strip()
+    ],
+    "buffer": {
+      "received": received_len,
+      "window": seq_len,
+      "status": buffer_status,
+      "bar": _format_buffer_bar(received_len, seq_len),
+    },
+    "raw_top": {"label": "idle", "confidence": round(confidence, 1), "index": 0},
+    "raw_second": {"label": "idle", "confidence": round(confidence, 1), "index": 0},
   }
 
 
@@ -781,6 +1177,7 @@ def _run_samples(samples: list[dict], payload: dict | None):
     global _EMA_PROBS, _LAST_RAW_SAMPLE
     _EMA_PROBS = None
     _PRED_QUEUE.clear()
+    _PRED_DEVICE_QUEUE.clear()
     _LAST_RAW_SAMPLE = None
 
   timeline = []
@@ -793,6 +1190,7 @@ def _run_samples(samples: list[dict], payload: dict | None):
         _SEQ_BUFFER.clear()
         _EMA_PROBS = None
         _PRED_QUEUE.clear()
+        _PRED_DEVICE_QUEUE.clear()
 
       features = _extract_features_from_sample(sample)
       _SEQ_BUFFER.append(features.tolist())
@@ -864,52 +1262,68 @@ def _predict_from_sequence(sequence: np.ndarray, received_len: int, payload: dic
 
   problem_type = meta.get("problem_type") or "multiclass"
   power_w = _power_from_sample(_LAST_RAW_SAMPLE)
+  noise_floor_w = float(meta.get("noise_floor_w") or 3.0)
+  device_probs = _device_probs_payload(labels, probs, meta.get("devices"))
+
+  if power_w < noise_floor_w:
+    buffer_status = "READY" if received_len >= seq_len else "LOADING"
+    buffer_bar = _format_buffer_bar(received_len, seq_len)
+    return {
+      "success": True,
+      "label": "idle",
+      "confidence": round(max(0.0, 1.0 - float(np.max(probs))) * 100.0, 1),
+      "index": top_index,
+      "model_version": meta.get("model_name") or "unknown_model",
+      "label_source": label_source,
+      "timestamp": _now_iso(),
+      "problem_type": problem_type,
+      "active_devices": [],
+      "device_probs": device_probs,
+      "buffer": {
+        "received": received_len,
+        "window": seq_len,
+        "status": buffer_status,
+        "bar": buffer_bar,
+      },
+      "raw_top": {
+        "label": top_label,
+        "confidence": round(top_confidence, 1),
+        "index": top_index,
+      },
+      "raw_second": {
+        "label": second_label,
+        "confidence": round(second_confidence, 1),
+        "index": second_index,
+      },
+    }
 
   if problem_type == "multilabel":
     devices = meta.get("devices") or labels
-    threshold = float(meta.get("threshold") or 0.5)
-    power_range = meta.get("power_range") or {}
-    
-    # Deteksi device aktif berdasarkan threshold
-    active_indices = [index for index, prob in enumerate(probs) if float(prob) >= threshold]
-    active_labels = [labels[index] for index in active_indices]
-    lookup = _multilabel_name_lookup(meta)
 
-    raw_label = lookup.get(frozenset(active_labels))
-    if not raw_label:
-      raw_label = "idle" if not active_labels else "+".join(active_labels)
+    active_labels = _finalize_multilabel_devices(probs, labels, devices, meta, power_w)
+    raw_label = _resolve_multilabel_label(active_labels, meta)
 
-    # Power-based validation: jika label tidak sesuai power range, coba device lain
-    # Hanya untuk multiclass fallback; multilabel sudah independen per device
-    if raw_label != "idle" and power_range:
-      label_range = power_range.get(raw_label)
-      if label_range and not (label_range[0] <= power_w <= label_range[1] * 1.2):
-        # Power di luar range, coba kombinasi device lain dengan prob tertinggi
-        sorted_indices = list(np.argsort(-probs))
-        for alt_index in sorted_indices[:3]:
-          alt_device = labels[alt_index]
-          alt_range = power_range.get(alt_device)
-          if alt_range and alt_range[0] <= power_w <= alt_range[1] * 1.2:
-            # Adjust active_indices untuk pakai device ini
-            if alt_index in active_indices:
-              pass  # Sudah termasuk dalam active
-            else:
-              # Re-threshold: gunakan device dengan prob tertinggi yang match power range
-              if float(probs[alt_index]) >= threshold * 0.8:  # Lebih lenient untuk fallback
-                active_indices = [alt_index] if not active_indices else active_indices
-            break
-
-    _PRED_QUEUE.append(raw_label)
-    chosen_label = _majority_vote_label() or raw_label
-    chosen_active_devices = _active_devices_from_label(chosen_label, devices)
+    _PRED_DEVICE_QUEUE.append(frozenset(active_labels))
+    chosen_active_devices = _majority_vote_active_devices(devices)
+    if not chosen_active_devices and active_labels:
+      chosen_active_devices = active_labels
+    chosen_label = _resolve_multilabel_label(chosen_active_devices, meta)
     if chosen_active_devices:
       chosen_indices = [labels.index(device) for device in chosen_active_devices if device in labels]
       chosen_confidence = float(np.mean([float(probs[index]) for index in chosen_indices])) * 100.0
     else:
       chosen_confidence = max(0.0, 1.0 - float(np.max(probs))) * 100.0
 
+    if (
+      chosen_active_devices == ["charger_hp"]
+      and _solo_power_range_fits("charger_hp", power_w, meta.get("power_range") or {})
+      and chosen_confidence < 45.0
+    ):
+      chosen_confidence = max(chosen_confidence, 72.0)
+
     chosen_index = top_index
-    smoothing = f"vote:{_PRED_QUEUE.maxlen}"
+    smoothing = f"device_vote:{_PRED_DEVICE_QUEUE.maxlen}"
+    active_devices = chosen_active_devices
   else:
     prefer_non_uncertain = bool((payload or {}).get("prefer_non_uncertain", True))
     uncertain_label = str((payload or {}).get("uncertain_label", "uncertain"))
@@ -938,7 +1352,15 @@ def _predict_from_sequence(sequence: np.ndarray, received_len: int, payload: dic
             chosen_confidence = alt_confidence
             break
 
+    active_devices = _active_devices_from_label(chosen_label, labels)
+
   buffer_status = "READY" if received_len >= seq_len else "LOADING"
+  min_buf = max(10, seq_len // 3)
+  if received_len < min_buf:
+    buffer_status = "WARMING"
+
+  if problem_type != "multilabel":
+    active_devices = _active_devices_from_label(chosen_label, labels)
   buffer_bar = _format_buffer_bar(received_len, seq_len)
   print(
     f"[{_REQUEST_COUNT:05d}] Buffer {received_len}/{seq_len} {buffer_bar} {buffer_status} | "
@@ -955,6 +1377,9 @@ def _predict_from_sequence(sequence: np.ndarray, received_len: int, payload: dic
     "model_version": meta.get("model_name") or "unknown_model",
     "label_source": label_source,
     "timestamp": _now_iso(),
+    "problem_type": problem_type,
+    "active_devices": active_devices,
+    "device_probs": device_probs,
     "buffer": {
       "received": received_len,
       "window": seq_len,
@@ -977,10 +1402,14 @@ def _predict_from_sequence(sequence: np.ndarray, received_len: int, payload: dic
 
 @app.get("/health")
 def health():
+  meta = _read_model_meta()
   return jsonify(
     {
       "success": True,
       "model_dir": str(MODEL_DIR),
+      "model_version": meta.get("model_name"),
+      "problem_type": meta.get("problem_type"),
+      "devices": meta.get("devices"),
       "files": _get_model_files(),
     }
   )
@@ -1064,6 +1493,14 @@ def labels():
   label_source = _get_label_source()
   labels_path = MODEL_DIR / "labels.json"
   configured_labels = None
+  meta_path = _model_root() / "meta_nilm.json"
+  session_to_label = None
+  device_display = None
+
+  if meta_path.exists():
+    raw_meta = _read_json(meta_path)
+    session_to_label = raw_meta.get("session_to_label")
+    device_display = raw_meta.get("device_display")
 
   if labels_path.exists():
     configured_labels = _read_json(labels_path).get("labels", [])
@@ -1078,7 +1515,11 @@ def labels():
       "model_dir": str(MODEL_DIR),
       "model_name": meta.get("model_name"),
       "output_units": meta.get("output_units"),
+      "problem_type": meta.get("problem_type"),
+      "devices": meta.get("devices"),
       "labels": visible_labels,
+      "session_to_label": session_to_label,
+      "device_display": device_display,
       "label_source": label_source,
       "has_placeholders": len(placeholders) > 0,
       "placeholders": placeholders,
@@ -1127,27 +1568,14 @@ def ingest():
   payload = request.get_json(silent=True) or {}
   sample = _normalize_sample(payload)
 
-  with _LOCK:
-    _ensure_runtime_state()
-    if _should_reset_buffer_for_device_change(sample):
-      _SEQ_BUFFER.clear()
-      _EMA_PROBS = None
-      _PRED_QUEUE.clear()
-
-    try:
-      features = _extract_features_from_sample(sample)
-    except Exception as exc:
-      return jsonify({"success": False, "error": str(exc)}), 400
-
-    _SEQ_BUFFER.append(features.tolist())
-    sequence, received_len = _parse_sequence({"sequence": list(_SEQ_BUFFER)})
-
   try:
-    response_payload = _predict_from_sequence(sequence, received_len, payload)
+    with _LOCK:
+      pred = _get_v9_predictor().predict(sample)
+      response_payload = _predictor_to_response(pred, sample)
   except Exception as exc:
     return jsonify({"success": False, "error": str(exc)}), 500
 
-  update_blynk = bool(payload.get("update_blynk", True))
+  update_blynk = bool(payload.get("update_blynk", False))
   blynk_result = None
   if update_blynk:
     meta = _read_model_meta()
@@ -1173,15 +1601,18 @@ def thingsboard_ingest():
 
 @app.post("/reset")
 def reset():
-  global _EMA_PROBS, _LAST_RAW_SAMPLE, _PREV_POWER, _LATEST_RESULT
+  global _EMA_PROBS, _LAST_RAW_SAMPLE, _PREV_POWER, _LATEST_RESULT, _V9_PREDICTOR
   with _LOCK:
     _ensure_runtime_state()
     _SEQ_BUFFER.clear()
     _PRED_QUEUE.clear()
+    _PRED_DEVICE_QUEUE.clear()
     _EMA_PROBS = None
     _LAST_RAW_SAMPLE = None
     _PREV_POWER = None
     _LATEST_RESULT = None
+    if _V9_PREDICTOR is not None:
+      _V9_PREDICTOR.reset()
   return jsonify({"success": True})
 
 
@@ -1216,5 +1647,29 @@ def demo_dummy():
   )
 
 
+def _preload_model_on_startup():
+  """Muat model saat startup agar request pertama tidak terasa hang."""
+  print("=" * 60)
+  print("NILM ML Service")
+  print(f"  Model dir : {MODEL_DIR}")
+  print(f"  Model ada : {(MODEL_DIR / 'best_nilm_model.keras').exists()}")
+  try:
+    meta = _read_model_meta()
+    print(f"  Versi     : {meta.get('model_name')}")
+    print(f"  Devices   : {meta.get('devices')}")
+    print(f"  Window    : {meta.get('input_shape')}")
+    print("  Memuat TensorFlow (10–30 detik, tunggu)...")
+    predictor = _get_v9_predictor()
+    print(f"  Predictor : {predictor.meta.get('model_version')}")
+    print("  Model SIAP.")
+  except Exception as exc:
+    print(f"  GAGAL muat model: {exc}")
+    print("  Server tetap jalan; perbaiki model lalu restart.")
+  print("=" * 60)
+
+
 if __name__ == "__main__":
-  app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5001")))
+  port = int(os.environ.get("PORT", "5001"))
+  _preload_model_on_startup()
+  print(f"Server: http://127.0.0.1:{port}  (CTRL+C untuk stop)")
+  app.run(host="0.0.0.0", port=port, threaded=True)

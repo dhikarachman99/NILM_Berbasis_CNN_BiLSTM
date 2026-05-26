@@ -1,4 +1,5 @@
-import { readModelLabels, readTrainedModelInfo } from "@/lib/modelInfo";
+import { readTrainedModelInfo } from "@/lib/modelInfo";
+import { getSessionToLabel, NILM_META } from "@/lib/nilmMeta";
 import type { NilmData } from "@/types/nilm";
 
 interface DeviceProfile {
@@ -31,14 +32,14 @@ interface SimulatorState {
 }
 
 const FALLBACK_LABELS = [
-  "charger_hp",
-  "rice_cooker",
-  "fan_room",
-  "laptop_charger",
-  "desk_lamp",
-  "uncertain",
-  "other",
   "idle",
+  "charger_hp",
+  "hair_dryer",
+  "kipas",
+  "laptop",
+  "hair_dryer+charger_hp",
+  "kipas+laptop",
+  "laptop+hair_dryer+charger_hp",
 ];
 
 const state: SimulatorState = {
@@ -174,21 +175,21 @@ function getProfile(label: string): DeviceProfile {
     };
   }
 
-  if (normalized.includes("rice") || normalized.includes("cooker")) {
+  if (normalized.includes("hair") && normalized.includes("dryer")) {
     return {
-      powerBase: 320,
-      powerSwing: 85,
-      powerNoise: 14,
-      powerFactorMin: 0.9,
-      powerFactorMax: 0.98,
-      confidenceMin: 86,
-      confidenceMax: 98,
+      powerBase: 215,
+      powerSwing: 20,
+      powerNoise: 8,
+      powerFactorMin: 0.95,
+      powerFactorMax: 1.0,
+      confidenceMin: 88,
+      confidenceMax: 99,
       holdMin: 3,
-      holdMax: 6,
+      holdMax: 5,
     };
   }
 
-  if (normalized.includes("fan")) {
+  if (normalized.includes("kipas") || normalized.includes("fan")) {
     return {
       powerBase: 62,
       powerSwing: 18,
@@ -216,15 +217,43 @@ function getProfile(label: string): DeviceProfile {
     };
   }
 
-  if (normalized.includes("charger") || normalized.includes("phone") || normalized.includes("laptop")) {
+  if (normalized.includes("laptop")) {
     return {
-      powerBase: 44,
-      powerSwing: 14,
-      powerNoise: 4,
+      powerBase: 72,
+      powerSwing: 18,
+      powerNoise: 5,
+      powerFactorMin: 0.82,
+      powerFactorMax: 0.95,
+      confidenceMin: 84,
+      confidenceMax: 98,
+      holdMin: 3,
+      holdMax: 5,
+    };
+  }
+
+  if (normalized.includes("charger") || normalized.includes("hp")) {
+    return {
+      powerBase: 12,
+      powerSwing: 4,
+      powerNoise: 2,
       powerFactorMin: 0.78,
       powerFactorMax: 0.91,
       confidenceMin: 79,
       confidenceMax: 96,
+      holdMin: 2,
+      holdMax: 4,
+    };
+  }
+
+  if (normalized.includes("+")) {
+    return {
+      powerBase: 180,
+      powerSwing: 45,
+      powerNoise: 12,
+      powerFactorMin: 0.85,
+      powerFactorMax: 0.98,
+      confidenceMin: 82,
+      confidenceMax: 97,
       holdMin: 3,
       holdMax: 5,
     };
@@ -245,11 +274,14 @@ function getProfile(label: string): DeviceProfile {
 
 async function readMockContext(): Promise<MockContext> {
   if (!contextPromise) {
-    contextPromise = Promise.all([readModelLabels(), readTrainedModelInfo()])
-      .then(([labels, modelInfo]) => ({
-        labels: labels.length > 0 ? labels : FALLBACK_LABELS,
-        modelVersion: modelInfo.model_name || "best_nilm_model",
-      }))
+    contextPromise = readTrainedModelInfo()
+      .then((modelInfo) => {
+        const sessionLabels = Object.values(getSessionToLabel()).filter(Boolean);
+        return {
+          labels: sessionLabels.length > 0 ? sessionLabels : FALLBACK_LABELS,
+          modelVersion: modelInfo.model_name || NILM_META.model_version || "v9_multilabel",
+        };
+      })
       .catch(() => ({
         labels: FALLBACK_LABELS,
         modelVersion: "best_nilm_model",

@@ -5,11 +5,12 @@ import { cn, formatTimestamp } from "@/lib/utils";
 interface HeaderProps {
   statusLabel: string;
   lastUpdated?: string;
+  modelVersion?: string;
   onOpenMenu: () => void;
   isStale: boolean;
 }
 
-export function Header({ statusLabel, lastUpdated, onOpenMenu, isStale }: HeaderProps) {
+export function Header({ statusLabel, lastUpdated, modelVersion, onOpenMenu, isStale }: HeaderProps) {
   const isOnline = statusLabel.toLowerCase().includes("online");
 
   return (
@@ -34,6 +35,11 @@ export function Header({ statusLabel, lastUpdated, onOpenMenu, isStale }: Header
           </div>
 
           <div className="flex flex-col items-start gap-2 sm:items-end">
+            {modelVersion ? (
+              <span className="inline-flex items-center rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-800 ring-1 ring-violet-100">
+                Model: {modelVersion}
+              </span>
+            ) : null}
             <span
               className={cn(
                 "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold",

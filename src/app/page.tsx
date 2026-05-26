@@ -346,6 +346,9 @@ export default function HomePage() {
           device={data?.device_detected ?? "idle"}
           confidence={data?.confidence ?? 0}
           modelVersion={data?.model_version ?? "N/A"}
+          activeDevices={data?.active_devices}
+          deviceProbs={data?.device_probs}
+          bufferStatus={data?.buffer_status}
         />
         <EnergyCostCard
           energy={data?.energy ?? 0}
@@ -366,6 +369,9 @@ export default function HomePage() {
           device={data?.device_detected ?? "idle"}
           confidence={data?.confidence ?? 0}
           modelVersion={data?.model_version ?? "N/A"}
+          activeDevices={data?.active_devices}
+          deviceProbs={data?.device_probs}
+          bufferStatus={data?.buffer_status}
         />
         <SectionCard
           title="Detection Metadata"
@@ -424,6 +430,7 @@ export default function HomePage() {
         <Header
           statusLabel={statusLabel}
           lastUpdated={data?.timestamp ?? lastUpdated}
+          modelVersion={data?.model_version}
           isStale={isStale}
           onOpenMenu={() => setMobileOpen(true)}
         />
@@ -443,7 +450,11 @@ export default function HomePage() {
             />
           ) : null}
           {activeSection === "settings" ? (
-            <SettingsPanel settings={settings} onChange={handleSettingsChange} />
+            <SettingsPanel
+              settings={settings}
+              modelVersion={data?.model_version}
+              onChange={handleSettingsChange}
+            />
           ) : null}
         </main>
       </div>

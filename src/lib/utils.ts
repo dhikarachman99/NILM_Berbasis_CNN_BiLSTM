@@ -90,24 +90,7 @@ export function isDataStale(timestamp?: string | null, refreshInterval = 3000) {
   return Date.now() - parsed.getTime() > staleThreshold;
 }
 
-export function normalizeDeviceName(device: string) {
-  return device
-    .replaceAll("_", " ")
-    .replaceAll("+", " + ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((token) => {
-      if (token.toLowerCase() === "hp") {
-        return "HP";
-      }
-      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
-    })
-    .join(" ");
-}
-
-export function formatDeviceLabel(device: string) {
-  return normalizeDeviceName(device);
-}
+export { formatActiveDevices, formatDeviceLabel } from "@/lib/nilmMeta";
 
 
 export function getConfidenceLabel(confidence: number) {

@@ -1,9 +1,11 @@
 import { Save, Wifi } from "lucide-react";
 
+import { ModelV9Panel } from "@/components/ModelV9Panel";
 import type { DashboardSettings } from "@/types/nilm";
 
 interface SettingsPanelProps {
   settings: DashboardSettings;
+  modelVersion?: string;
   onChange: <K extends keyof DashboardSettings>(key: K, value: DashboardSettings[K]) => void;
 }
 
@@ -20,7 +22,7 @@ const telemetryKeys = [
   "timestamp",
 ];
 
-export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
+export function SettingsPanel({ settings, modelVersion, onChange }: SettingsPanelProps) {
   return (
     <section className="space-y-6">
       <div>
@@ -72,6 +74,8 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
         </div>
 
         <div className="space-y-6">
+          <ModelV9Panel runtimeVersion={modelVersion} />
+
           <div className="rounded-3xl border border-blue-100/80 bg-white/95 p-6 shadow-sm shadow-blue-100/70">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -95,13 +99,13 @@ export function SettingsPanel({ settings, onChange }: SettingsPanelProps) {
           <div className="rounded-3xl border border-blue-100/80 bg-white/95 p-6 shadow-sm shadow-blue-100/70">
             <h3 className="text-lg font-semibold text-slate-900">Environment Variable</h3>
             <div className="mt-4 space-y-3 text-sm text-slate-600">
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">NILM_MODEL_DIR=src/nilm_models_v9</p>
               <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">NILM_DATA_SOURCE=thingsboard</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_ACCESS_TOKEN=token-device-esp32</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_BASE_URL=https://your-thingsboard-host</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_JWT_TOKEN=jwt-token-thingsboard</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_DEVICE_ID=opsional-device-id</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_USERNAME=opsional-fallback-login</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_PASSWORD=opsional-fallback-login</p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_BASE_URL=https://eu.thingsboard.cloud</p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_API_TOKEN=rest-api-token-dari-thingsboard</p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_DEVICE_ID=uuid-device-di-thingsboard</p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_AUTH_MODE=auto</p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_ACCESS_TOKEN=token-device-esp32 (opsional)</p>
               <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">ML_SERVICE_URL=http://127.0.0.1:5001</p>
               <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">NEXT_PUBLIC_REFRESH_INTERVAL=3000</p>
             </div>

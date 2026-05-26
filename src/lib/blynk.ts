@@ -1,3 +1,11 @@
+import {
+  buildMlFallbackInference,
+  inferFromMlService,
+  mapInferenceToNilmFields,
+  resolveDetectedLabel,
+  type InferenceResponse,
+  type SensorSample,
+} from "@/lib/mlService";
 import type { NilmData } from "@/types/nilm";
 
 const REQUIRED_PIN_MAP = {
@@ -19,28 +27,6 @@ const OPTIONAL_PIN_MAP = {
 type RequiredPinField = keyof typeof REQUIRED_PIN_MAP;
 type OptionalPinField = keyof typeof OPTIONAL_PIN_MAP;
 
-interface SensorSample {
-  voltage: number;
-  current: number;
-  power: number;
-  energy: number;
-  frequency: number;
-  power_factor: number;
-}
-
-interface InferenceResponse {
-  success: boolean;
-  label?: string;
-  confidence?: number;
-  model_version?: string;
-  label_source?: string;
-  timestamp?: string;
-  buffer?: {
-    status?: string;
-  };
-  error?: string;
-}
-
 const NUMERIC_FIELDS = new Set<keyof NilmData | RequiredPinField>([
   "voltage",
   "current",
@@ -53,10 +39,6 @@ const NUMERIC_FIELDS = new Set<keyof NilmData | RequiredPinField>([
 
 function getBaseUrl() {
   return (process.env.BLYNK_BASE_URL || "https://blynk.cloud/external/api").replace(/\/$/, "");
-}
-
-function getMlServiceUrl() {
-  return (process.env.ML_SERVICE_URL || "http://127.0.0.1:5001").replace(/\/$/, "");
 }
 
 function cleanValue(rawValue: string) {
@@ -92,28 +74,6 @@ async function fetchVirtualPinOptional(pin: string, token: string) {
   } catch {
     return null;
   }
-}
-
-async function inferFromMlService(sample: SensorSample) {
-  const response = await fetch(`${getMlServiceUrl()}/ingest`, {
-    method: "POST",
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      sample,
-      update_blynk: process.env.ML_UPDATE_BLYNK === "true",
-    }),
-  });
-
-  const payload = (await response.json()) as InferenceResponse;
-
-  if (!response.ok || !payload.success || !payload.label) {
-    throw new Error(payload.error || "ML service tidak mengembalikan prediksi yang valid.");
-  }
-
-  return payload;
 }
 
 export async function fetchLatestBlynkDataWithMeta(token: string): Promise<{ data: NilmData; notice?: string }> {
@@ -161,10 +121,11 @@ export async function fetchLatestBlynkDataWithMeta(token: string): Promise<{ dat
   let inferredConfidence = 0;
   let inferredModelVersion = rawOptional.model_version ?? "N/A";
   let inferredTimestamp = rawOptional.timestamp ?? new Date().toISOString();
+  let inference: InferenceResponse | null = null;
 
   try {
-    const inference = await inferFromMlService(parsedRequired);
-    inferredLabel = inference.label ?? inferredLabel;
+    inference = await inferFromMlService(parsedRequired);
+    inferredLabel = resolveDetectedLabel(inference);
     inferredConfidence = inference.confidence ?? inferredConfidence;
     inferredModelVersion = inference.model_version ?? inferredModelVersion;
     inferredTimestamp = inference.timestamp ?? inferredTimestamp;
@@ -180,8 +141,17 @@ export async function fetchLatestBlynkDataWithMeta(token: string): Promise<{ dat
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown ML service error";
+    inference = buildMlFallbackInference(parsedRequired);
+    inferredLabel = resolveDetectedLabel(inference);
+    inferredConfidence = inference.confidence ?? 0;
+    inferredModelVersion = inference.model_version ?? inferredModelVersion;
+    inferredTimestamp = inference.timestamp ?? inferredTimestamp;
 
-    if (rawOptional.device_detected != null || rawOptional.confidence != null || rawOptional.model_version != null) {
+    if (inference.label === "idle") {
+      notices.push(
+        `ML service tidak dapat diakses (${message}). Daya rendah — ditampilkan sebagai idle (heuristik noise floor).`,
+      );
+    } else if (rawOptional.device_detected != null || rawOptional.confidence != null || rawOptional.model_version != null) {
       notices.push(`ML service tidak dapat diakses (${message}). Menggunakan hasil inferensi terakhir dari Blynk jika tersedia.`);
     } else {
       notices.push(`ML service tidak dapat diakses (${message}). Label perangkat belum bisa dihitung dari data ESP32.`);
@@ -203,6 +173,7 @@ export async function fetchLatestBlynkDataWithMeta(token: string): Promise<{ dat
     confidence: inferredConfidence,
     model_version: inferredModelVersion,
     timestamp: inferredTimestamp,
+    ...(inference ? mapInferenceToNilmFields(inference) : { active_devices: [], device_probs: [] }),
   };
 
   return {
