@@ -1,0 +1,2 @@
+:HL["/NILM_Berbasis_CNN_BiLSTM/_next/static/chunks/01a7c6r3r-cuj.css","style"]
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"/_not-found","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"GjulP0IdMmYEJ8DbMWHkg"}
