@@ -69,7 +69,8 @@ export function SettingsPanel({ settings, modelVersion, onChange }: SettingsPane
           </div>
 
           <div className="mt-6 rounded-3xl border border-blue-100 bg-blue-50/50 px-5 py-4 text-sm text-slate-600">
-            Dashboard menarik telemetry live dari ThingsBoard, lalu backend mengirim sample sensor ke model NILM untuk menghasilkan label perangkat.
+            Dashboard (GitHub Pages) memanggil ML service di Hugging Face (<code className="rounded bg-white px-1">/dashboard/latest</code>
+            ), yang membaca ThingsBoard dan menjalankan inferensi NILM.
           </div>
         </div>
 
@@ -97,17 +98,16 @@ export function SettingsPanel({ settings, modelVersion, onChange }: SettingsPane
           </div>
 
           <div className="rounded-3xl border border-blue-100/80 bg-white/95 p-6 shadow-sm shadow-blue-100/70">
-            <h3 className="text-lg font-semibold text-slate-900">Environment Variable</h3>
+            <h3 className="text-lg font-semibold text-slate-900">Deploy config</h3>
             <div className="mt-4 space-y-3 text-sm text-slate-600">
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">NILM_MODEL_DIR=src/nilm_models_v9</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">NILM_DATA_SOURCE=thingsboard</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_BASE_URL=https://eu.thingsboard.cloud</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_API_TOKEN=rest-api-token-dari-thingsboard</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_DEVICE_ID=uuid-device-di-thingsboard</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_AUTH_MODE=auto</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">THINGSBOARD_ACCESS_TOKEN=token-device-esp32 (opsional)</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">ML_SERVICE_URL=http://127.0.0.1:5001</p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">
+                <span className="font-medium text-slate-800">GitHub Pages build:</span> NEXT_PUBLIC_ML_SERVICE_URL
+              </p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">
+                <span className="font-medium text-slate-800">HF Space:</span> THINGSBOARD_* + NILM_MODEL_DIR
+              </p>
               <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">NEXT_PUBLIC_REFRESH_INTERVAL=3000</p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">Lihat docs/DEPLOY_GITHUB_PAGES.md</p>
             </div>
           </div>
         </div>

@@ -29,10 +29,10 @@ import {
   formatTimestamp,
   isDataStale,
 } from "@/lib/utils";
+import { fetchDashboardLatest } from "@/lib/dashboardClient";
 import type {
   DataSource,
   DashboardSettings,
-  LatestBlynkResponse,
   NavigationSection,
   NilmData,
   PowerHistoryPoint,
@@ -146,12 +146,9 @@ export default function HomePage() {
     }
 
     try {
-      const response = await fetch("/api/blynk/latest", {
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as LatestBlynkResponse;
+      const payload = await fetchDashboardLatest();
 
-      if (!response.ok || !payload.success || !payload.data) {
+      if (!payload.success || !payload.data) {
         setError(payload.error ?? "Koneksi sumber data gagal");
         setNotice(null);
         return;

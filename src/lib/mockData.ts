@@ -1,4 +1,3 @@
-import { readTrainedModelInfo } from "@/lib/modelInfo";
 import { getSessionToLabel, NILM_META } from "@/lib/nilmMeta";
 import type { NilmData } from "@/types/nilm";
 
@@ -274,18 +273,11 @@ function getProfile(label: string): DeviceProfile {
 
 async function readMockContext(): Promise<MockContext> {
   if (!contextPromise) {
-    contextPromise = readTrainedModelInfo()
-      .then((modelInfo) => {
-        const sessionLabels = Object.values(getSessionToLabel()).filter(Boolean);
-        return {
-          labels: sessionLabels.length > 0 ? sessionLabels : FALLBACK_LABELS,
-          modelVersion: modelInfo.model_name || NILM_META.model_version || "v9_multilabel",
-        };
-      })
-      .catch(() => ({
-        labels: FALLBACK_LABELS,
-        modelVersion: "best_nilm_model",
-      }));
+    const sessionLabels = Object.values(getSessionToLabel()).filter(Boolean);
+    contextPromise = Promise.resolve({
+      labels: sessionLabels.length > 0 ? sessionLabels : FALLBACK_LABELS,
+      modelVersion: NILM_META.model_version || "v9_multilabel",
+    });
   }
 
   return contextPromise;

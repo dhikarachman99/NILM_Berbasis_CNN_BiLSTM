@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 import numpy as np
 import requests
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 
 # Load environment variables from the repository root .env file if available.
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -39,6 +40,12 @@ _NOTEBOOK_GLOB = "*.ipynb"
 _MODEL_ARCHIVE_GLOB = "*.keras"
 
 app = Flask(__name__)
+_cors_origins = os.environ.get("CORS_ORIGINS", "*")
+CORS(
+  app,
+  origins=[origin.strip() for origin in _cors_origins.split(",") if origin.strip()],
+  supports_credentials=False,
+)
 
 _MODEL = None
 _LABELS_CACHE = None
@@ -1012,6 +1019,10 @@ def _build_latest_result(sample, response_payload):
   if response_payload.get("device_probs") is not None:
     data["device_probs"] = response_payload["device_probs"]
 
+  buffer = response_payload.get("buffer") or {}
+  if buffer.get("status"):
+    data["buffer_status"] = buffer["status"]
+
   return {
     "success": True,
     "data": data,
@@ -1536,6 +1547,64 @@ def latest():
   return jsonify(_LATEST_RESULT)
 
 
+@app.get("/dashboard/latest")
+def dashboard_latest():
+  """Pipeline untuk GitHub Pages: ThingsBoard → inferensi → JSON dashboard."""
+  global _LATEST_RESULT
+
+  if str(os.environ.get("USE_DUMMY_BLYNK", "")).lower() in ("1", "true", "yes"):
+    samples = _load_dummy_samples()
+    if not samples:
+      return jsonify({"success": False, "error": "Dummy samples tidak tersedia."}), 503
+    sample = _normalize_sample(samples[-1])
+    source = "dummy"
+  else:
+    try:
+      from thingsboard_client import fetch_thingsboard_sample
+
+      sample = _normalize_sample(fetch_thingsboard_sample())
+      source = "thingsboard"
+    except Exception as exc:
+      return jsonify(
+        {
+          "success": False,
+          "data": None,
+          "source": "thingsboard",
+          "last_updated": _now_iso(),
+          "error": f"ThingsBoard connection error: {exc}",
+        }
+      ), 502
+
+  try:
+    with _LOCK:
+      pred = _get_v9_predictor().predict(sample)
+      response_payload = _predictor_to_response(pred, sample)
+  except Exception as exc:
+    return jsonify(
+      {
+        "success": False,
+        "data": None,
+        "source": source,
+        "last_updated": _now_iso(),
+        "error": f"ML inference error: {exc}",
+      }
+    ), 500
+
+  built = _build_latest_result(sample, response_payload)
+  _LATEST_RESULT = built
+  data = built["data"]
+  return jsonify(
+    {
+      "success": True,
+      "data": data,
+      "source": source,
+      "last_updated": data.get("timestamp") or _now_iso(),
+      "error": None,
+      "meta": built.get("meta"),
+    }
+  )
+
+
 @app.post("/predict")
 def predict():
   payload = request.get_json(silent=True)
@@ -1666,6 +1735,10 @@ def _preload_model_on_startup():
     print(f"  GAGAL muat model: {exc}")
     print("  Server tetap jalan; perbaiki model lalu restart.")
   print("=" * 60)
+
+
+if os.environ.get("NILM_PRELOAD_MODEL", "").lower() in ("1", "true", "yes"):
+  _preload_model_on_startup()
 
 
 if __name__ == "__main__":

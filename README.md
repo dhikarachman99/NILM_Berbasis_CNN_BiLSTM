@@ -41,11 +41,14 @@ npm run build
 npm run start
 ```
 
-## Deploy to Vercel
+## Deploy
 
-The Next.js dashboard deploys on **Vercel**; the Flask ML service must run on **Render** (or similar) because TensorFlow cannot run on Vercel Serverless.
+| Part | Platform |
+|------|----------|
+| Dashboard (Next.js static) | **GitHub Pages** — [docs/DEPLOY_GITHUB_PAGES.md](docs/DEPLOY_GITHUB_PAGES.md) |
+| ML + ThingsBoard pipeline | **Hugging Face Spaces (Docker)** — [docs/DEPLOY_HUGGINGFACE.md](docs/DEPLOY_HUGGINGFACE.md) |
 
-See **[docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md)** for step-by-step setup, environment variables, and troubleshooting.
+GitHub secret `ML_SERVICE_URL` = your HF Space URL (e.g. `https://user-nilm-ml.hf.space`).
 
 ## Konfigurasi `.env.local`
 
