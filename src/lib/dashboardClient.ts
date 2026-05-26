@@ -1,17 +1,5 @@
 import type { LatestBlynkResponse } from "@/types/nilm";
-
-function getMlServiceUrl(): string {
-  const url =
-    process.env.NEXT_PUBLIC_ML_SERVICE_URL?.trim() ||
-    (process.env.NODE_ENV === "development" ? "http://127.0.0.1:5001" : "");
-
-  if (!url) {
-    throw new Error(
-      "ML service URL belum diatur. Local: ML_SERVICE_URL=http://127.0.0.1:5001 di .env",
-    );
-  }
-  return url.replace(/\/$/, "");
-}
+import { getMlDashboardEndpoint, getMlServiceUrl } from "@/lib/mlServiceConfig";
 
 export async function fetchDashboardLatest(): Promise<LatestBlynkResponse> {
   if (process.env.NEXT_PUBLIC_USE_DUMMY_BLYNK === "true") {
@@ -26,7 +14,7 @@ export async function fetchDashboardLatest(): Promise<LatestBlynkResponse> {
     };
   }
 
-  const endpoint = `${getMlServiceUrl()}/dashboard/latest`;
+  const endpoint = getMlDashboardEndpoint();
   let response: Response;
   try {
     response = await fetch(endpoint, {
@@ -35,7 +23,7 @@ export async function fetchDashboardLatest(): Promise<LatestBlynkResponse> {
     });
   } catch {
     throw new Error(
-      `Tidak bisa terhubung ke ML service (${endpoint}). Pastikan server jalan: cd ml_service && python app.py`,
+      `Tidak bisa terhubung ke ML service (${endpoint}). Cek HF Space aktif dan CORS_ORIGINS mencakup localhost jika dev lokal.`,
     );
   }
 
@@ -47,7 +35,7 @@ export async function fetchDashboardLatest(): Promise<LatestBlynkResponse> {
   } catch {
     if (response.status === 404) {
       throw new Error(
-        "Endpoint /dashboard/latest tidak ada (404). Restart ML service: hentikan proses lama di port 5001, lalu jalankan ulang `cd ml_service && python app.py`.",
+        `Endpoint /dashboard/latest tidak ada (404) di ${getMlServiceUrl()}. Pastikan HF Space sudah build dan URL benar.`,
       );
     }
     throw new Error("ML service mengembalikan response yang bukan JSON valid.");
@@ -55,7 +43,7 @@ export async function fetchDashboardLatest(): Promise<LatestBlynkResponse> {
 
   if (response.status === 404) {
     throw new Error(
-      "Endpoint /dashboard/latest tidak ada (404). Restart ML service: hentikan proses lama di port 5001, lalu jalankan ulang `cd ml_service && python app.py`.",
+      `Endpoint /dashboard/latest tidak ada (404) di ${getMlServiceUrl()}. Pastikan HF Space sudah build dan URL benar.`,
     );
   }
 

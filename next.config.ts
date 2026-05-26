@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+const DEFAULT_ML_SERVICE_URL = "https://dhikarachman-nilm-ml-service.hf.space";
+
 const repoName = process.env.GITHUB_REPOSITORY?.split("/")[1];
 const basePath =
   process.env.NEXT_PUBLIC_BASE_PATH?.trim() ||
@@ -16,7 +18,7 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_ML_SERVICE_URL:
       process.env.NEXT_PUBLIC_ML_SERVICE_URL ||
       process.env.ML_SERVICE_URL ||
-      "http://127.0.0.1:5001",
+      DEFAULT_ML_SERVICE_URL,
     NEXT_PUBLIC_USE_DUMMY_BLYNK:
       process.env.NEXT_PUBLIC_USE_DUMMY_BLYNK || process.env.USE_DUMMY_BLYNK || "false",
   },

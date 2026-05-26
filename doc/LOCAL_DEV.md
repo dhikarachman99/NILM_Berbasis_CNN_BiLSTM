@@ -1,68 +1,47 @@
-# Jalankan semuanya di local (tanpa Hugging Face)
+# Dev lokal — dashboard memakai HF Space (disarankan)
 
-Bisa. ML service + dashboard bisa jalan sepenuhnya di komputer Anda.
-
-> **Catatan:** GitHub Pages (online) tidak bisa memanggil `http://127.0.0.1` di laptop Anda.  
-> Mode local ini untuk development / demo di PC yang sama.
-
----
-
-## Terminal 1 — ML service
-
-```powershell
-cd c:\Users\Dhikarachman\tugas_akhir\ml_service
-pip install -r requirements.txt
-python app.py
-```
-
-Tunggu sampai muncul **Model SIAP** dan:
-
-```text
-Server: http://127.0.0.1:5001
-```
-
-Tes di browser:
-
-- http://127.0.0.1:5001/health
-- http://127.0.0.1:5001/dashboard/latest
-
----
-
-## Terminal 2 — Dashboard
+Dashboard di laptop memanggil API cloud; **tidak perlu** menjalankan `python app.py` lokal.
 
 ```powershell
 cd c:\Users\Dhikarachman\tugas_akhir
+copy env.local.example .env.local
 npm install
 npm run dev
 ```
 
 Buka: http://localhost:3000
 
+Default API: `https://dhikarachman-nilm-ml-service.hf.space`
+
+**HF Space → CORS_ORIGINS** harus mencakup:
+
+```env
+CORS_ORIGINS=https://dhikarachman99.github.io,http://localhost:3000,http://127.0.0.1:3000
+```
+
+Tes API:
+
+```powershell
+.\scripts\test-hf-api.ps1
+```
+
 ---
 
-## File `.env` (sudah Anda punya)
+## Mode lama — ML service lokal (opsional)
 
-Pastikan ada:
+Hanya jika ingin debug Flask di port 5001:
+
+```powershell
+cd c:\Users\Dhikarachman\tugas_akhir\ml_service
+python app.py
+```
+
+`.env.local`:
 
 ```env
-NILM_MODEL_DIR=src/nilm_models_v9
-NILM_DATA_SOURCE=thingsboard
+NEXT_PUBLIC_ML_SERVICE_URL=http://127.0.0.1:5001
 ML_SERVICE_URL=http://127.0.0.1:5001
-THINGSBOARD_BASE_URL=https://eu.thingsboard.cloud
-THINGSBOARD_ACCESS_TOKEN=...
-# ... key telemetry lainnya
-USE_DUMMY_BLYNK=false
 ```
-
-`ML_SERVICE_URL` otomatis dipakai dashboard saat `npm run dev`.
-
-Tanpa ThingsBoard (simulasi saja):
-
-```env
-USE_DUMMY_BLYNK=true
-```
-
-di HF Space / ml_service env — atau set di `.env` dan jalankan ML dengan dummy (lihat bawah).
 
 ---
 

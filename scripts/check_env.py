@@ -66,7 +66,11 @@ def main() -> int:
     api_token = os.getenv("THINGSBOARD_API_TOKEN", "").strip()
     device_id = os.getenv("THINGSBOARD_DEVICE_ID", "").strip()
     device_token = os.getenv("THINGSBOARD_ACCESS_TOKEN", "").strip()
-    ml_url = (os.getenv("ML_SERVICE_URL") or "").rstrip("/")
+    ml_url = (
+        os.getenv("NEXT_PUBLIC_ML_SERVICE_URL")
+        or os.getenv("ML_SERVICE_URL")
+        or "https://dhikarachman-nilm-ml-service.hf.space"
+    ).rstrip("/")
 
     print("\n[Variabel utama]")
     print(f"  NILM_MODEL_DIR          = {model_dir or '(kosong)'}")
@@ -158,19 +162,28 @@ def main() -> int:
         except requests.RequestException as exc:
             warn(f"Device API: {exc}")
 
-    # --- ML service ---
+    # --- ML service (HF atau lokal) ---
     print("\n[ML Service]")
     if ml_url:
+        is_hf = ".hf.space" in ml_url
         try:
-            r = requests.get(f"{ml_url}/health", timeout=5)
+            r = requests.get(f"{ml_url}/health", timeout=60 if is_hf else 10)
             if r.status_code == 200:
                 data = r.json()
-                ok(f"ML service aktif — model_dir={data.get('model_dir', '?')}")
+                ok(f"ML service aktif ({'HF' if is_hf else 'lokal'}) — model={data.get('model_version', '?')}")
             else:
-                fail(f"ML service HTTP {r.status_code}")
+                fail(f"ML service HTTP {r.status_code} — {ml_url}/health")
                 errors += 1
-        except requests.RequestException:
-            fail("ML service tidak berjalan — jalankan: cd ml_service && python app.py")
+            r2 = requests.get(f"{ml_url}/dashboard/latest", timeout=90 if is_hf else 15)
+            if r2.status_code == 200 and r2.json().get("success"):
+                ok("GET /dashboard/latest HTTP 200")
+            else:
+                warn(f"/dashboard/latest HTTP {r2.status_code} — cek ThingsBoard di HF Space")
+        except requests.RequestException as exc:
+            if is_hf:
+                fail(f"HF Space tidak terjangkau: {exc}")
+            else:
+                fail("ML service lokal tidak berjalan — jalankan: cd ml_service && python app.py")
             errors += 1
     else:
         fail("ML_SERVICE_URL kosong")

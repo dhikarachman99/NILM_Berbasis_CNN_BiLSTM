@@ -1,6 +1,7 @@
 import { Save, Wifi } from "lucide-react";
 
 import { ModelV9Panel } from "@/components/ModelV9Panel";
+import { getMlDashboardEndpoint, getMlServiceUrl, isRemoteMlService } from "@/lib/mlServiceConfig";
 import type { DashboardSettings } from "@/types/nilm";
 
 interface SettingsPanelProps {
@@ -23,6 +24,9 @@ const telemetryKeys = [
 ];
 
 export function SettingsPanel({ settings, modelVersion, onChange }: SettingsPanelProps) {
+  const mlUrl = getMlServiceUrl();
+  const remoteMl = isRemoteMlService();
+
   return (
     <section className="space-y-6">
       <div>
@@ -68,9 +72,18 @@ export function SettingsPanel({ settings, modelVersion, onChange }: SettingsPane
             </label>
           </div>
 
-          <div className="mt-6 rounded-3xl border border-blue-100 bg-blue-50/50 px-5 py-4 text-sm text-slate-600">
-            Dashboard (GitHub Pages) memanggil ML service di Hugging Face (<code className="rounded bg-white px-1">/dashboard/latest</code>
-            ), yang membaca ThingsBoard dan menjalankan inferensi NILM.
+          <div className="mt-6 space-y-3 rounded-3xl border border-blue-100 bg-blue-50/50 px-5 py-4 text-sm text-slate-600">
+            <p>
+              {remoteMl
+                ? "Mode lokal: dashboard memanggil ML service di Hugging Face (tanpa python app.py di laptop)."
+                : "Dashboard memanggil ML service lokal atau remote via URL di bawah."}
+            </p>
+            <p className="break-all rounded-2xl bg-white px-3 py-2 font-mono text-xs text-blue-800">
+              {getMlDashboardEndpoint()}
+            </p>
+            <p className="text-xs text-slate-500">
+              ThingsBoard & inferensi dijalankan di server ML{remoteMl ? " (HF Space Variables)" : ""}, bukan di browser.
+            </p>
           </div>
         </div>
 
@@ -98,16 +111,18 @@ export function SettingsPanel({ settings, modelVersion, onChange }: SettingsPane
           </div>
 
           <div className="rounded-3xl border border-blue-100/80 bg-white/95 p-6 shadow-sm shadow-blue-100/70">
-            <h3 className="text-lg font-semibold text-slate-900">Deploy config</h3>
+            <h3 className="text-lg font-semibold text-slate-900">ML service (aktif)</h3>
             <div className="mt-4 space-y-3 text-sm text-slate-600">
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">
-                <span className="font-medium text-slate-800">GitHub Pages build:</span> NEXT_PUBLIC_ML_SERVICE_URL
+              <p className="break-all rounded-2xl border border-violet-100 bg-violet-50/50 px-4 py-3 font-mono text-xs">
+                {mlUrl}
               </p>
               <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">
-                <span className="font-medium text-slate-800">HF Space:</span> THINGSBOARD_* + NILM_MODEL_DIR
+                <span className="font-medium text-slate-800">Lokal:</span> .env.local → NEXT_PUBLIC_ML_SERVICE_URL
               </p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">NEXT_PUBLIC_REFRESH_INTERVAL=3000</p>
-              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">Lihat doc/DEPLOY_GITHUB_PAGES.md</p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">
+                <span className="font-medium text-slate-800">HF Space:</span> THINGSBOARD_* + CORS_ORIGINS (localhost)
+              </p>
+              <p className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-3">Lihat doc/LOCAL_DEV.md</p>
             </div>
           </div>
         </div>

@@ -1,4 +1,7 @@
+import { getMlServiceUrl } from "@/lib/mlServiceConfig";
 import { heuristicLabelFromPower, labelToDeviceKey, resolveLabelFromActiveDevices } from "@/lib/nilmMeta";
+
+export { getMlServiceUrl } from "@/lib/mlServiceConfig";
 import type { DeviceProbability, NilmData } from "@/types/nilm";
 
 export interface SensorSample {
@@ -82,10 +85,6 @@ export interface LatestMlData {
       status?: string;
     };
   };
-}
-
-export function getMlServiceUrl() {
-  return (process.env.ML_SERVICE_URL || "http://127.0.0.1:5001").replace(/\/$/, "");
 }
 
 async function parseMlServiceJson<T>(response: Response, endpoint: string): Promise<T> {

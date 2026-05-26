@@ -173,8 +173,10 @@ export default function HomePage() {
 
         return [...previous, nextPoint].slice(-HISTORY_LIMIT);
       });
-    } catch {
-      setError("Koneksi sumber data gagal");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Koneksi ke ML service Hugging Face gagal";
+      setError(message);
       setNotice(null);
     } finally {
       setIsLoading(false);
