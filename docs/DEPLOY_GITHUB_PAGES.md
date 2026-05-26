@@ -44,13 +44,17 @@ https://<username>-<space>.hf.space/health
 
 ## Part 2 — Enable GitHub Pages
 
-1. Repo → **Settings** → **Pages**
-2. **Build and deployment** → Source: **GitHub Actions**
-3. (After first workflow run) site URL:
+1. Push once to `main` (workflow creates branch `gh-pages`).
+2. Repo → **Settings** → **Pages**
+3. **Build and deployment** → Source: **Deploy from a branch**
+4. Branch: **`gh-pages`** / folder **`/(root)`**
+5. Save. Site URL:
 
 ```text
 https://<username>.github.io/<repo-name>/
 ```
+
+> Jika sebelumnya memakai **GitHub Actions** sebagai source dan error `upload-pages-artifact`, ganti ke **branch `gh-pages`** seperti di atas.
 
 ---
 
@@ -81,8 +85,8 @@ git push origin main
 
 Workflow: [`.github/workflows/deploy-pages.yml`](../.github/workflows/deploy-pages.yml)
 
-- Builds static export to `out/`
-- Deploys via GitHub Actions
+- `npm run build` → folder `out/`
+- Push ke branch **`gh-pages`** via `peaceiris/actions-gh-pages` (lebih stabil daripada `upload-pages-artifact`)
 
 ---
 
@@ -131,6 +135,8 @@ For project pages `username.github.io/repo-name/`, default `/repo-name` is appli
 | CORS error | Set `CORS_ORIGINS` on HF Space to your `*.github.io` URL |
 | ML error in UI | Open `/dashboard/latest` on HF directly |
 | Build fails | Run `npm run build` locally |
+| `upload-pages-artifact` error | Workflow sudah pakai `peaceiris/actions-gh-pages`; set Pages source ke branch `gh-pages` |
+| Internal server error GitHub | Re-run workflow; atau tunggu beberapa menit lalu push lagi |
 | Secrets in static JS | Only `NEXT_PUBLIC_*` are embedded — never put TB passwords in GitHub build secrets for Pages; keep them on HF Space |
 
 ---
