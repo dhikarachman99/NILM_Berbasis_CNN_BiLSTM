@@ -6,6 +6,8 @@ import { fetchLatestThingsBoardDataWithMeta } from "@/lib/thingsboard";
 import type { LatestBlynkResponse } from "@/types/nilm";
 
 export const dynamic = "force-dynamic";
+/** ThingsBoard + ML inference can exceed default 10s on Hobby — use Pro or optimize interval. */
+export const maxDuration = 60;
 
 export async function GET() {
   const useDummyBlynk = process.env.USE_DUMMY_BLYNK === "true";

@@ -41,6 +41,12 @@ npm run build
 npm run start
 ```
 
+## Deploy to Vercel
+
+The Next.js dashboard deploys on **Vercel**; the Flask ML service must run on **Render** (or similar) because TensorFlow cannot run on Vercel Serverless.
+
+See **[docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md)** for step-by-step setup, environment variables, and troubleshooting.
+
 ## Konfigurasi `.env.local`
 
 Buat file `.env.local` di root project:
