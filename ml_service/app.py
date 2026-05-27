@@ -1425,17 +1425,57 @@ def _predict_from_sequence(sequence: np.ndarray, received_len: int, payload: dic
 
 @app.get("/health")
 def health():
-  meta = _read_model_meta()
+  try:
+    meta = _read_model_meta()
+    model_ok = True
+  except Exception:
+    meta = {}
+    model_ok = False
+
+  base_url = (os.environ.get("THINGSBOARD_BASE_URL") or "").strip().rstrip("/")
+  device_id = (os.environ.get("THINGSBOARD_DEVICE_ID") or "").strip()
+  api_token_set = bool((os.environ.get("THINGSBOARD_API_TOKEN") or "").strip())
+  username_set = bool((os.environ.get("THINGSBOARD_USERNAME") or "").strip())
+  password_set = bool((os.environ.get("THINGSBOARD_PASSWORD") or "").strip())
+  login_set = username_set and password_set
+
+  required_vars = [
+    "THINGSBOARD_BASE_URL",
+    "THINGSBOARD_DEVICE_ID",
+    "THINGSBOARD_KEY_VOLTAGE",
+    "THINGSBOARD_KEY_CURRENT",
+    "THINGSBOARD_KEY_POWER",
+    "THINGSBOARD_KEY_ENERGY",
+    "THINGSBOARD_KEY_FREQUENCY",
+    "THINGSBOARD_KEY_POWER_FACTOR",
+  ]
+  missing_vars = [key for key in required_vars if not (os.environ.get(key) or "").strip()]
+  if not (api_token_set or login_set):
+    missing_vars.extend(["THINGSBOARD_API_TOKEN (atau THINGSBOARD_USERNAME + THINGSBOARD_PASSWORD)"])
+
+  device_hint = None
+  if device_id:
+    digest = hashlib.sha256(device_id.encode("utf-8")).hexdigest()
+    device_hint = f"sha256:{digest[:8]}"
+
   return jsonify(
     {
       "success": True,
       "status": "ok",
       "source": "thingsboard",
       "model_dir": str(MODEL_DIR),
+      "model_ok": model_ok,
       "model_version": meta.get("model_name"),
       "problem_type": meta.get("problem_type"),
       "devices": meta.get("devices"),
       "files": _get_model_files(),
+      "cors_origins": _cors_origins,
+      "thingsboard": {
+        "base_url": base_url or None,
+        "device_id": device_hint,
+        "auth": "api_token" if api_token_set else "login" if login_set else "missing",
+        "missing": missing_vars,
+      },
     }
   )
 
@@ -1454,6 +1494,8 @@ def index():
         "/model/files/config.json",
         "/model/files/metadata.json",
         "/latest",
+        "/telemetry/latest",
+        "/predict/live",
         "/dashboard/latest",
         "/predict",
         "/ingest",
