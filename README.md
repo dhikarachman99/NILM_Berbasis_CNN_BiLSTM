@@ -18,8 +18,8 @@ Dashboard modern untuk sistem Non-Intrusive Load Monitoring (NILM) berbasis Deep
 ## Fitur Utama
 
 - Monitoring parameter listrik real-time
-- API route backend `GET /api/blynk/latest` sebagai gateway data telemetry ke frontend
-- Integrasi inferensi model NILM melalui Flask `ml_service`
+- Dashboard statis (GitHub Pages) hanya memanggil endpoint publik Hugging Face Space
+- Hugging Face Space membaca telemetry live dari ThingsBoard via REST API tenant, lalu menjalankan inferensi NILM
 - Fallback mock data untuk simulasi saat mode dummy diaktifkan
 - Summary cards, power chart, device detection panel, energy cost estimation
 - System status page dan settings page
@@ -53,29 +53,130 @@ npm run start
 | Dashboard (Next.js static) | **GitHub Pages** — [doc/DEPLOY_GITHUB_PAGES.md](doc/DEPLOY_GITHUB_PAGES.md) |
 | ML + ThingsBoard pipeline | **Hugging Face Spaces (Docker)** — [doc/DEPLOY_HUGGINGFACE.md](doc/DEPLOY_HUGGINGFACE.md) |
 
-GitHub secret `ML_SERVICE_URL` = your HF Space URL (e.g. `https://user-nilm-ml.hf.space`).
+GitHub Pages dashboard memanggil base URL HF Space lewat `NEXT_PUBLIC_ML_SERVICE_URL`.
 
-## Konfigurasi `.env.local`
+## Arsitektur (aman)
 
-Buat file `.env.local` di root project:
+```text
+Browser (GitHub Pages)
+  └── GET https://<user>-<space>.hf.space/predict/live
+        ├── ThingsBoard tenant REST API (Secrets/Variables di HF)
+        └── NILM inference (model di HF Space)
+```
+
+- Dashboard tidak pernah memanggil ThingsBoard langsung.
+- Tidak ada token/password/API key ThingsBoard yang dikirim ke browser.
+
+## Environment Variables
+
+### 1) GitHub Pages (public)
+
+Set di build environment untuk frontend (hanya yang aman dipublikasi):
+
+```env
+NEXT_PUBLIC_ML_SERVICE_URL=https://<user>-<space>.hf.space
+NEXT_PUBLIC_REFRESH_INTERVAL=3000
+NEXT_PUBLIC_USE_DUMMY_BLYNK=false
+```
+
+### 2) Hugging Face Space (server-only)
+
+Semua `THINGSBOARD_*` harus disimpan di HF Space **Secrets/Variables** (bukan di source code dan bukan di `NEXT_PUBLIC_*`).
+
+**HF Space Variables (Public/Variables)**
 
 ```env
 NILM_MODEL_DIR=src/nilm_models_v9
-# atau jika ingin gunakan format file alias yang kadang dipakai VS Code:
-# NILM_MODEL_DIR=@file:src/nilm_models_v9
 NILM_DATA_SOURCE=thingsboard
-THINGSBOARD_ACCESS_TOKEN=token_device_esp32
-THINGSBOARD_BASE_URL=https://your-thingsboard-host
-THINGSBOARD_JWT_TOKEN=jwt_token_thingsboard
-THINGSBOARD_DEVICE_ID=opsional_device_id
-THINGSBOARD_USERNAME=opsional_fallback_login
-THINGSBOARD_PASSWORD=opsional_fallback_login
-ML_SERVICE_URL=http://127.0.0.1:5001
 USE_DUMMY_BLYNK=false
-NEXT_PUBLIC_REFRESH_INTERVAL=3000
+CORS_ORIGINS=https://dhikarachman99.github.io,http://localhost:3000,http://localhost:5173
+
+THINGSBOARD_BASE_URL=https://eu.thingsboard.cloud
+THINGSBOARD_DEVICE_ID=<DEVICE_UUID>
+THINGSBOARD_KEY_VOLTAGE=tegangan
+THINGSBOARD_KEY_CURRENT=arus
+THINGSBOARD_KEY_POWER=daya
+THINGSBOARD_KEY_ENERGY=kwh
+THINGSBOARD_KEY_FREQUENCY=frekuensi
+THINGSBOARD_KEY_POWER_FACTOR=power_factor
 ```
 
-## Menjalankan ML Service
+**HF Space Secrets (Private/Secrets)**
+
+```env
+THINGSBOARD_API_TOKEN=tb_...
+# optional fallback jika ApiKey tidak tersedia:
+THINGSBOARD_USERNAME=...
+THINGSBOARD_PASSWORD=...
+```
+
+Catatan: `THINGSBOARD_ACCESS_TOKEN` adalah credential device untuk publish telemetry, bukan untuk baca telemetry dashboard.
+
+## Endpoint (HF Space)
+
+- `GET /health`
+- `GET /telemetry/latest`
+- `GET /predict/live`
+- `GET /dashboard/latest` (legacy untuk kompatibilitas)
+
+## Testing (curl)
+
+```bash
+curl -s https://<user>-<space>.hf.space/health
+curl -s https://<user>-<space>.hf.space/telemetry/latest
+curl -s https://<user>-<space>.hf.space/predict/live
+```
+
+## Contoh Response
+
+### Sukses: `/predict/live`
+
+```json
+{
+  "ok": true,
+  "source": "thingsboard",
+  "device_id": "sha256:1a2b3c4d",
+  "telemetry": {
+    "voltage": {"key": "tegangan", "value": 216.5, "ts": 1716812786000},
+    "current": {"key": "arus", "value": 0.161, "ts": 1716812786000},
+    "power": {"key": "daya", "value": 20.8, "ts": 1716812786000},
+    "energy": {"key": "kwh", "value": 3.825, "ts": 1716812786000},
+    "frequency": {"key": "frekuensi", "value": 50.0, "ts": 1716812786000},
+    "power_factor": {"key": "power_factor", "value": 0.6, "ts": 1716812786000}
+  },
+  "prediction": {
+    "ok": true,
+    "data": {
+      "label": "idle",
+      "confidence": 21.2,
+      "model_version": "v9_multilabel",
+      "timestamp": "2026-05-27T12:26:26.296434Z",
+      "buffer": {"received": 1, "window": 30, "status": "WARMING", "bar": "[#-------------------]"}
+    },
+    "error": null
+  },
+  "warnings": []
+}
+```
+
+### Error aman: autentikasi gagal
+
+```json
+{
+  "ok": false,
+  "source": "thingsboard",
+  "error": "ThingsBoard authentication failed"
+}
+```
+
+## Debug cepat (telemetry kosong / HF sleep)
+
+- HF Space idle/cold start: buka `/health` dulu, tunggu sampai siap.
+- CORS error di browser: pastikan `CORS_ORIGINS` hanya berisi origin tanpa path (contoh: `https://dhikarachman99.github.io`).
+- Telemetry kosong: cek key ThingsBoard (`THINGSBOARD_KEY_*`) sesuai yang dipublish device.
+- 401/403: cek `THINGSBOARD_API_TOKEN` atau kredensial login di HF Secrets.
+
+## Menjalankan ML Service (lokal)
 
 ```bash
 cd ml_service
@@ -84,13 +185,7 @@ python app.py
 
 Service Flask berjalan default di `http://127.0.0.1:5001`.
 
-## Alur Live ThingsBoard
-
-- ESP32 mengirim telemetry ke ThingsBoard memakai `THINGSBOARD_ACCESS_TOKEN`.
-- Backend Next memprioritaskan `THINGSBOARD_JWT_TOKEN` untuk akses REST API ThingsBoard.
-- Jika JWT tidak diisi atau expired, backend akan fallback login memakai `THINGSBOARD_USERNAME` dan `THINGSBOARD_PASSWORD`.
-- Backend mengambil latest telemetry device secara live dari ThingsBoard, lalu mengirim sample ke `ml_service` untuk inferensi label.
-- `THINGSBOARD_DEVICE_ID` opsional. Jika tidak diisi, backend akan mencoba mencari device berdasarkan `THINGSBOARD_ACCESS_TOKEN`.
+Untuk local dev, simpan credential ThingsBoard di `.env.local` (file ini tidak boleh di-commit).
 
 ## Key Telemetry ThingsBoard
 
@@ -114,9 +209,7 @@ Output inferensi yang dikembalikan backend:
 - Ubah field `Tarif listrik per kWh`
 - Nilai otomatis disimpan di browser melalui `localStorage`
 
-## Catatan API
+## Catatan Security
 
-- Endpoint backend: `GET /api/blynk/latest`
-- Jika `NILM_DATA_SOURCE=thingsboard`, route akan login ke ThingsBoard dan membaca latest telemetry live dari device.
-- `THINGSBOARD_ACCESS_TOKEN` dipakai ESP32 untuk publish telemetry ke ThingsBoard.
-- Backend bisa langsung memakai `THINGSBOARD_JWT_TOKEN` manual jika sudah tersedia.
+- Jangan taruh `THINGSBOARD_*` (token/password/device id) di GitHub Pages, `NEXT_PUBLIC_*`, atau source code.
+- Jangan simpan token ThingsBoard di `localStorage/sessionStorage`.

@@ -19,7 +19,7 @@ ENV NILM_MODEL_DIR=src/nilm_models_v9
 ENV NILM_DEPLOY_TARGET=huggingface
 ENV NILM_PRELOAD_MODEL=1
 ENV PORT=7860
-ENV CORS_ORIGINS=*
+ENV CORS_ORIGINS=https://dhikarachman99.github.io,http://localhost:3000,http://localhost:5173
 
 WORKDIR /code/ml_service
 EXPOSE 7860

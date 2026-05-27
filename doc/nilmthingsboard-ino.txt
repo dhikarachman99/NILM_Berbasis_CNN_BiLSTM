@@ -20,24 +20,24 @@
 // ==========================================
 // KONFIGURASI WIFI
 // ==========================================
-const char* ssid     = "Los Kontraktor";
-const char* password = "muentasabatang";
+const char* ssid     = "<WIFI_SSID>";
+const char* password = "<WIFI_PASSWORD>";
 
 // ==========================================
 // KONFIGURASI THINGSBOARD (MQTT)
 // ==========================================
 const char* TB_SERVER = "mqtt.eu.thingsboard.cloud";
 const int   TB_PORT   =  1883;
-const char* TB_TOKEN  = "j9b5wdiw5xrw4lmmffq0";
+const char* TB_TOKEN  = "<THINGSBOARD_DEVICE_TOKEN>";
 const char* TB_TOPIC  = "v1/devices/me/telemetry";
 
 // ==========================================
 // KONFIGURASI FIREBASE
 // ==========================================
-#define FIREBASE_API_KEY       "AIzaSyD9D0O5NX6gnynRTIZZrcgTXmigY6JYjQI"
-#define FIREBASE_DATABASE_URL  "https://nilm-deep-learning-default-rtdb.firebaseio.com"
-#define FIREBASE_USER_EMAIL    "esp32pzem@gmail.com"
-#define FIREBASE_USER_PASSWORD "esp32pzemdhika"
+#define FIREBASE_API_KEY       "<FIREBASE_API_KEY>"
+#define FIREBASE_DATABASE_URL  "<FIREBASE_DATABASE_URL>"
+#define FIREBASE_USER_EMAIL    "<FIREBASE_USER_EMAIL>"
+#define FIREBASE_USER_PASSWORD "<FIREBASE_USER_PASSWORD>"
 
 // ==========================================
 // KONFIGURASI PIN ESP32-S3
@@ -135,8 +135,6 @@ void reconnectMQTT() {
 
     Serial.print("Connecting dengan clientId: ");
     Serial.println(clientId);
-    Serial.print("Token: ");
-    Serial.println(TB_TOKEN);
 
     if (mqttClient.connect(clientId, TB_TOKEN, "")) {
       Serial.println("ThingsBoard terhubung!");

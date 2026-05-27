@@ -77,25 +77,30 @@ First request after idle may take 1–2 minutes (cold start + TensorFlow load).
 
 ## 6. ThingsBoard env on HF Space (for GitHub Pages)
 
-Set on the Space (Settings → Variables), **not** in the static site:
+Set on the Space ([Settings → Variables](https://huggingface.co/spaces/dhikarachman/nilm-ml-service/settings)), **not** in the static site:
 
 ```env
 THINGSBOARD_BASE_URL=https://eu.thingsboard.cloud
-THINGSBOARD_ACCESS_TOKEN=your_device_token
-THINGSBOARD_API_TOKEN=optional
-THINGSBOARD_DEVICE_ID=optional
-CORS_ORIGINS=*
+THINGSBOARD_API_TOKEN=tb_...
+THINGSBOARD_DEVICE_ID=<DEVICE_UUID>
+CORS_ORIGINS=https://dhikarachman99.github.io,http://localhost:3000
 ```
 
+Note: `THINGSBOARD_ACCESS_TOKEN` is a device credential typically used to **publish** telemetry, not to **read** telemetry for the dashboard.
+
 ## 7. Connect GitHub Pages
+
+Repo: `dhikarachman99/NILM_Berbasis_CNN_BiLSTM`
 
 GitHub repo → **Settings** → **Secrets** → Actions:
 
 | Secret | Value |
 |--------|--------|
-| `ML_SERVICE_URL` | `https://yourusername-nilm-ml-service.hf.space` |
+| `ML_SERVICE_URL` | `https://dhikarachman-nilm-ml-service.hf.space` |
 
-See [DEPLOY_GITHUB_PAGES.md](DEPLOY_GITHUB_PAGES.md).
+Live site: https://dhikarachman99.github.io/NILM_Berbasis_CNN_BiLSTM/
+
+See [PRODUCTION_SETUP.md](PRODUCTION_SETUP.md) and [DEPLOY_GITHUB_PAGES.md](DEPLOY_GITHUB_PAGES.md).
 
 ---
 
@@ -135,7 +140,7 @@ git push
 ## Architecture
 
 ```text
-Browser → Vercel (Next.js)
-            ├→ ThingsBoard
-            └→ https://<user>-<space>.hf.space/ingest
+Browser (GitHub Pages) → https://<user>-<space>.hf.space/predict/live
+                            ├→ ThingsBoard tenant REST API
+                            └→ NILM inference
 ```

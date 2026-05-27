@@ -5,13 +5,12 @@ export const DEFAULT_ML_SERVICE_URL =
 export function getMlServiceUrl(): string {
   const url =
     process.env.NEXT_PUBLIC_ML_SERVICE_URL?.trim() ||
-    process.env.ML_SERVICE_URL?.trim() ||
     DEFAULT_ML_SERVICE_URL;
   return url.replace(/\/$/, "");
 }
 
 export function getMlDashboardEndpoint(): string {
-  return `${getMlServiceUrl()}/dashboard/latest`;
+  return `${getMlServiceUrl()}/predict/live`;
 }
 
 export function isRemoteMlService(): boolean {
@@ -32,13 +31,16 @@ export async function fetchMlHealth(): Promise<{
     });
     const payload = (await response.json()) as {
       success?: boolean;
+      status?: string;
       model_version?: string;
+      modelVersion?: string;
       error?: string;
     };
-    if (!response.ok || !payload.success) {
+    const isOk = Boolean(payload.success) || payload.status === "ok";
+    if (!response.ok || !isOk) {
       return { ok: false, error: payload.error ?? `HTTP ${response.status}` };
     }
-    return { ok: true, modelVersion: payload.model_version };
+    return { ok: true, modelVersion: payload.model_version ?? payload.modelVersion };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Koneksi gagal";
     return { ok: false, error: message };

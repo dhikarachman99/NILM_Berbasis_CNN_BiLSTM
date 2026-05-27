@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env.local")
 
 MASK = "***"
 
@@ -77,7 +78,7 @@ def main() -> int:
     print(f"  NILM_DATA_SOURCE        = {data_source or '(kosong)'}")
     print(f"  THINGSBOARD_BASE_URL    = {base_url or '(kosong)'}")
     print(f"  THINGSBOARD_API_TOKEN   = {mask(api_token)}")
-    print(f"  THINGSBOARD_DEVICE_ID   = {device_id or '(kosong)'}")
+    print(f"  THINGSBOARD_DEVICE_ID   = {mask(device_id)}")
     print(f"  THINGSBOARD_ACCESS_TOKEN= {mask(device_token)}")
     print(f"  ML_SERVICE_URL          = {ml_url or '(kosong)'}")
 
@@ -146,22 +147,6 @@ def main() -> int:
             fail(f"Koneksi ThingsBoard gagal: {exc}")
             errors += 1
 
-    # --- Device HTTP API (opsional) ---
-    print("\n[ThingsBoard Device API v1 (access token)]")
-    if base_url and device_token:
-        try:
-            r = requests.get(
-                f"{base_url}/api/v1/{device_token}/telemetry",
-                params={"keys": "daya", "limit": 1},
-                timeout=15,
-            )
-            if r.status_code == 200:
-                ok("Device telemetry HTTP 200")
-            else:
-                warn(f"Device telemetry HTTP {r.status_code} (tidak kritis jika pakai API token tenant)")
-        except requests.RequestException as exc:
-            warn(f"Device API: {exc}")
-
     # --- ML service (HF atau lokal) ---
     print("\n[ML Service]")
     if ml_url:
@@ -174,11 +159,11 @@ def main() -> int:
             else:
                 fail(f"ML service HTTP {r.status_code} — {ml_url}/health")
                 errors += 1
-            r2 = requests.get(f"{ml_url}/dashboard/latest", timeout=90 if is_hf else 15)
-            if r2.status_code == 200 and r2.json().get("success"):
-                ok("GET /dashboard/latest HTTP 200")
+            r2 = requests.get(f"{ml_url}/predict/live", timeout=90 if is_hf else 15)
+            if r2.status_code == 200 and (r2.json().get("ok") or r2.json().get("success")):
+                ok("GET /predict/live HTTP 200")
             else:
-                warn(f"/dashboard/latest HTTP {r2.status_code} — cek ThingsBoard di HF Space")
+                warn(f"/predict/live HTTP {r2.status_code} — cek ThingsBoard di HF Space")
         except requests.RequestException as exc:
             if is_hf:
                 fail(f"HF Space tidak terjangkau: {exc}")

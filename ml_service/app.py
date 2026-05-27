@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import zipfile
+import hashlib
 from datetime import datetime, timezone
 from collections import deque
 from pathlib import Path
@@ -16,6 +17,7 @@ from flask_cors import CORS
 # Load environment variables from the repository root .env file if available.
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
+load_dotenv(ROOT_DIR / ".env.local")
 
 
 def _normalize_model_dir(value: str | None) -> str:
@@ -40,7 +42,10 @@ _NOTEBOOK_GLOB = "*.ipynb"
 _MODEL_ARCHIVE_GLOB = "*.keras"
 
 app = Flask(__name__)
-_cors_raw = os.environ.get("CORS_ORIGINS", "*").strip()
+_cors_raw = os.environ.get(
+  "CORS_ORIGINS",
+  "https://dhikarachman99.github.io,http://localhost:3000,http://localhost:5173",
+).strip()
 _cors_origins = (
   [origin.strip() for origin in _cors_raw.split(",") if origin.strip()]
   if _cors_raw and _cors_raw != "*"
@@ -1424,6 +1429,8 @@ def health():
   return jsonify(
     {
       "success": True,
+      "status": "ok",
+      "source": "thingsboard",
       "model_dir": str(MODEL_DIR),
       "model_version": meta.get("model_name"),
       "problem_type": meta.get("problem_type"),
@@ -1554,6 +1561,176 @@ def latest():
     return jsonify({"success": False, "error": "Belum ada data telemetry yang masuk ke ML service."}), 404
   return jsonify(_LATEST_RESULT)
 
+def _hash_device_id(device_id: str | None) -> str:
+  if not device_id:
+    return "sha256:unknown"
+  digest = hashlib.sha256(device_id.encode("utf-8")).hexdigest()
+  return f"sha256:{digest[:8]}"
+
+
+def prepare_nilm_features(telemetry: dict) -> tuple[dict[str, float] | None, list[str]]:
+  required = ("voltage", "current", "power", "energy", "frequency", "power_factor")
+  warnings: list[str] = []
+  sample: dict[str, float] = {}
+  for metric in required:
+    entry = telemetry.get(metric) or {}
+    value = entry.get("value")
+    if value is None:
+      warnings.append(f"Telemetry key missing: {metric}")
+      continue
+    if isinstance(value, (int, float)):
+      sample[metric] = float(value)
+      continue
+    try:
+      sample[metric] = float(str(value))
+    except Exception:
+      warnings.append(f"Telemetry non-numeric: {metric}")
+  if any(metric not in sample for metric in required):
+    return None, warnings
+  return sample, warnings
+
+
+def run_nilm_prediction(sample: dict[str, float]) -> dict:
+  with _LOCK:
+    pred = _get_v9_predictor().predict(sample)
+    return _predictor_to_response(pred, sample)
+
+
+def format_prediction_response(response_payload: dict) -> dict:
+  return {
+    "label": response_payload.get("label"),
+    "confidence": response_payload.get("confidence"),
+    "model_version": response_payload.get("model_version"),
+    "timestamp": response_payload.get("timestamp"),
+    "problem_type": response_payload.get("problem_type"),
+    "active_devices": response_payload.get("active_devices"),
+    "device_probs": response_payload.get("device_probs"),
+    "buffer": response_payload.get("buffer"),
+    "label_source": response_payload.get("label_source"),
+  }
+
+
+@app.get("/telemetry/latest")
+def telemetry_latest():
+  try:
+    from thingsboard_client import (
+      get_latest_telemetry,
+      get_public_telemetry_meta,
+      normalize_telemetry_response,
+      validate_required_keys,
+    )
+
+    raw = get_latest_telemetry(use_cache=True)
+    telemetry, warnings = normalize_telemetry_response(raw)
+    missing_metrics = validate_required_keys(raw)
+    if missing_metrics:
+      warnings.append(f"Telemetry incomplete: {', '.join(missing_metrics)}")
+
+    last_ts = max(
+      [entry.get("ts") for entry in telemetry.values() if isinstance(entry, dict) and entry.get("ts") is not None],
+      default=None,
+    )
+
+    meta = get_public_telemetry_meta()
+    return jsonify(
+      {
+        "ok": True,
+        "success": True,
+        "source": meta.get("source", "thingsboard"),
+        "device_id": meta.get("device_id"),
+        "telemetry": telemetry,
+        "last_ts": last_ts,
+        "warnings": warnings,
+      }
+    )
+  except Exception as exc:
+    message = str(exc) if isinstance(exc, Exception) else "Telemetry error"
+    if "authentication failed" in message.lower():
+      safe = "ThingsBoard authentication failed"
+      code = 502
+    elif "device not found" in message.lower():
+      safe = "ThingsBoard device not found"
+      code = 502
+    elif "THINGSBOARD_" in message:
+      safe = message
+      code = 500
+    else:
+      safe = "ThingsBoard telemetry error"
+      code = 502
+    return jsonify({"ok": False, "success": False, "source": "thingsboard", "error": safe}), code
+
+
+@app.get("/predict/live")
+def predict_live():
+  if str(os.environ.get("USE_DUMMY_BLYNK", "")).lower() in ("1", "true", "yes"):
+    return jsonify({"ok": False, "success": False, "source": "dummy", "error": "Dummy mode not allowed for live"}), 400
+
+  try:
+    from thingsboard_client import (
+      get_latest_telemetry,
+      get_public_telemetry_meta,
+      normalize_telemetry_response,
+      validate_required_keys,
+    )
+
+    raw = get_latest_telemetry(use_cache=True)
+    telemetry, warnings = normalize_telemetry_response(raw)
+    missing_metrics = validate_required_keys(raw)
+    if missing_metrics:
+      warnings.append(f"Telemetry incomplete: {', '.join(missing_metrics)}")
+
+    sample, prep_warnings = prepare_nilm_features(telemetry)
+    warnings.extend(prep_warnings)
+
+    prediction = None
+    prediction_ok = False
+    prediction_error = None
+
+    if sample is None:
+      prediction_error = "Telemetry incomplete"
+    else:
+      try:
+        response_payload = run_nilm_prediction(sample)
+        prediction = format_prediction_response(response_payload)
+        prediction_ok = True
+      except Exception:
+        prediction_error = "Model unavailable"
+
+    meta = get_public_telemetry_meta()
+    last_ts = max(
+      [entry.get("ts") for entry in telemetry.values() if isinstance(entry, dict) and entry.get("ts") is not None],
+      default=None,
+    )
+
+    return jsonify(
+      {
+        "ok": True,
+        "success": True,
+        "source": meta.get("source", "thingsboard"),
+        "device_id": meta.get("device_id"),
+        "telemetry": telemetry,
+        "last_ts": last_ts,
+        "prediction": {"ok": prediction_ok, "data": prediction, "error": prediction_error},
+        "warnings": warnings,
+      }
+    )
+  except Exception as exc:
+    message = str(exc) if isinstance(exc, Exception) else "Predict error"
+    if "authentication failed" in message.lower():
+      safe = "ThingsBoard authentication failed"
+      code = 502
+    elif "device not found" in message.lower():
+      safe = "ThingsBoard device not found"
+      code = 502
+    elif "THINGSBOARD_" in message:
+      safe = message
+      code = 500
+    else:
+      safe = "ThingsBoard telemetry error"
+      code = 502
+    return jsonify({"ok": False, "success": False, "source": "thingsboard", "error": safe}), code
+
+
 
 @app.get("/dashboard/latest")
 def dashboard_latest():
@@ -1573,13 +1750,24 @@ def dashboard_latest():
       sample = _normalize_sample(fetch_thingsboard_sample())
       source = "thingsboard"
     except Exception as exc:
+      message = str(exc) if isinstance(exc, Exception) else "ThingsBoard error"
+      if "authentication failed" in message.lower():
+        safe = "ThingsBoard authentication failed"
+      elif "device not found" in message.lower():
+        safe = "ThingsBoard device not found"
+      elif "THINGSBOARD_" in message:
+        safe = message
+      elif "telemetry incomplete" in message.lower():
+        safe = "Telemetry incomplete"
+      else:
+        safe = "ThingsBoard telemetry error"
       return jsonify(
         {
           "success": False,
           "data": None,
           "source": "thingsboard",
           "last_updated": _now_iso(),
-          "error": f"ThingsBoard connection error: {exc}",
+          "error": safe,
         }
       ), 502
 
@@ -1587,14 +1775,14 @@ def dashboard_latest():
     with _LOCK:
       pred = _get_v9_predictor().predict(sample)
       response_payload = _predictor_to_response(pred, sample)
-  except Exception as exc:
+  except Exception:
     return jsonify(
       {
         "success": False,
         "data": None,
         "source": source,
         "last_updated": _now_iso(),
-        "error": f"ML inference error: {exc}",
+        "error": "Model unavailable",
       }
     ), 500
 
