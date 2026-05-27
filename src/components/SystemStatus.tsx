@@ -105,7 +105,7 @@ export function SystemStatus({
         />
         <StatusItem
           label="API Endpoint"
-          value="/dashboard/latest"
+          value="/predict/live"
           detail={getMlDashboardEndpoint()}
           icon={Server}
         />
