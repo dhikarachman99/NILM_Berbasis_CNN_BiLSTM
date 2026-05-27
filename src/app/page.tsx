@@ -49,10 +49,6 @@ const HISTORY_STORAGE_KEY = "nilm-power-history";
 const HISTORY_LIMIT = 24;
 
 function loadInitialSettings() {
-  if (typeof window === "undefined") {
-    return DEFAULT_SETTINGS;
-  }
-
   try {
     const storedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
 
@@ -72,10 +68,6 @@ function loadInitialSettings() {
 }
 
 function loadInitialHistory() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
   try {
     const storedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
 
@@ -119,9 +111,10 @@ function SectionCard({
 export default function HomePage() {
   const [activeSection, setActiveSection] = useState<NavigationSection>("dashboard");
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [settings, setSettings] = useState<DashboardSettings>(loadInitialSettings);
+  const [hasHydrated, setHasHydrated] = useState(false);
+  const [settings, setSettings] = useState<DashboardSettings>(DEFAULT_SETTINGS);
   const [data, setData] = useState<NilmData | null>(null);
-  const [history, setHistory] = useState<PowerHistoryPoint[]>(loadInitialHistory);
+  const [history, setHistory] = useState<PowerHistoryPoint[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [source, setSource] = useState<DataSource>("thingsboard");
   const [isLoading, setIsLoading] = useState(true);
@@ -130,12 +123,24 @@ export default function HomePage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-  }, [settings]);
+    setSettings(loadInitialSettings());
+    setHistory(loadInitialHistory());
+    setHasHydrated(true);
+  }, []);
 
   useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  }, [hasHydrated, settings]);
+
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history.slice(-HISTORY_LIMIT)));
-  }, [history]);
+  }, [hasHydrated, history]);
 
   const fetchLatest = useCallback(async () => {
     const hasPreviousData = Boolean(data);
