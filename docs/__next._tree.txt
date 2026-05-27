@@ -1,2 +1,2 @@
 :HL["/NILM_Berbasis_CNN_BiLSTM/_next/static/chunks/0y34mzjbzt-a~.css","style"]
-0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}},"staleTime":300,"buildId":"k0Xr4GLDsvj41uvWabQyQ"}
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}},"staleTime":300,"buildId":"Yskz_amun1lMtJngnFUHy"}
